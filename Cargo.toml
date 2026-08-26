@@ -80,6 +80,7 @@ members = [
   "fw/pal/traits",
   "fw/plat/std/lib",
   "fw/plat/std/pal",
+  "plugins/azihsm_pkcs11",
   "plugins/ossl_engine/integration-tests/masked-keygen",
   "plugins/ossl_engine/integration-tests/openssl-capi",
   "plugins/ossl_engine/integration-tests/openssl-cli",
