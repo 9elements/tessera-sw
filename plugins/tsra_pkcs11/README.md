@@ -119,6 +119,10 @@ gcc -shared -fPIC -Iinclude/pkcs11-v3.1 src/*.c -o tsra_pkcs11.so -lpthread
 `build.rs` drives CMake, which imports `tsra_api_native` via Corrosion and
 generates `tsra.h` with cbindgen.
 
+`include/pkcs11-v3.1/` holds the OASIS PKCS #11 v3.1 headers, vendored
+unmodified under their own copyright; see the `NOTICE` file there. The
+copyright check skips that directory.
+
 ## Configuration
 
 Credentials are read from the environment (`TSRA_PKCS11_ID` /

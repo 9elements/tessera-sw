@@ -1,9 +1,9 @@
 /*
  * PKCS #11 Specification Version 3.1
- * Committee Specification 01
- * 11 August 2022
- * Copyright (c) OASIS Open 2022. All Rights Reserved.
- * Source: https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/cs01/include/pkcs11-v3.1/
+ * OASIS Standard
+ * 23 July 2023
+ * Copyright (c) OASIS Open 2023. All Rights Reserved.
+ * Source: https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/include/pkcs11-v3.1/
  * Latest stage of narrative specification: https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/pkcs11-spec-v3.1.html
  * TC IPR Statement: https://www.oasis-open.org/committees/pkcs11/ipr.php 
  */
