@@ -80,7 +80,6 @@ members = [
   "fw/pal/traits",
   "fw/plat/std/lib",
   "fw/plat/std/pal",
-  "plugins/azihsm_pkcs11",
   "plugins/ossl_engine/integration-tests/masked-keygen",
   "plugins/ossl_engine/integration-tests/openssl-capi",
   "plugins/ossl_engine/integration-tests/openssl-cli",
@@ -92,6 +91,7 @@ members = [
   "plugins/ossl_prov/integration-tests/nginx",
   "plugins/ossl_prov/integration-tests/openssl-capi",
   "plugins/ossl_prov/integration-tests/openssl-cli",
+  "plugins/tsra_pkcs11",
   "tools/resiliency_stress",
   "xtask",
 
