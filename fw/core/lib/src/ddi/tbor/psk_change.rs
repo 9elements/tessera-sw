@@ -30,11 +30,13 @@ use tsra_fw_hsm_pal_traits::HsmCmdBuf;
 use tsra_fw_hsm_pal_traits::HsmError;
 use tsra_fw_hsm_pal_traits::HsmPal;
 use tsra_fw_hsm_pal_traits::HsmResult;
+use tsra_fw_hsm_pal_traits::HsmScopedAlloc;
 use tsra_fw_hsm_pal_traits::HsmSessId;
 use tsra_fw_hsm_pal_traits::HsmSessionRole;
 use tsra_fw_hsm_pal_traits::DEFAULT_PSK_CO;
 use tsra_fw_hsm_pal_traits::DEFAULT_PSK_CU;
 use tsra_fw_hsm_pal_traits::PSK_LEN;
+use tsra_fw_hsm_pal_traits::SESSION_PARAM_KEY_LEN;
 use tsra_fw_hsm_undo::UndoLog;
 
 /// PSK slot id written when the active session is the Crypto Officer.
@@ -49,7 +51,7 @@ pub(crate) async fn handle<'p, P: HsmPal>(
     cmd_buf: &mut HsmCmdBuf<'_>,
     undo: &mut UndoLog<'p>,
 ) -> HsmResult<usize> {
-    pal.alloc_scoped_async(io, async |_alloc| {
+    pal.alloc_scoped_async(io, async |alloc| {
         // `decode_mut` validates the wire frame and hands back a
         // destructured view: scalar `session_id` by value, plus
         // `psk_envelope` as `&mut HsmDmaBuf` so `aead_open` can decrypt the
@@ -76,6 +78,10 @@ pub(crate) async fn handle<'p, P: HsmPal>(
         // renegotiate to retry.  Cross-session replay is already
         // structurally impossible (HPKE-derived per-session `param_key`).
         pal.session_try_consume_psk_change(io, sess_id)?;
+        let auth_binding = crate::session::copy_auth_binding(pal, io, alloc, sess_id)?;
+        let param_key = alloc.dma_alloc(SESSION_PARAM_KEY_LEN)?;
+        param_key.copy_from_slice(pal.session_param_key(io, sess_id)?);
+        crate::session::validate_auth_binding(pal, io, alloc, sess_id, auth_binding).await?;
 
         // Record the prior PSK *before* overwriting it, so any later failure
         // — the crypto below, the response DMA, or the CQE post — restores it
@@ -85,10 +91,6 @@ pub(crate) async fn handle<'p, P: HsmPal>(
         let prior = crate::part_state::part_psk(pal, io, target_psk_id)?;
         let psk_prop = crate::part_state::part_psk_prop_id(target_psk_id)?;
         undo.push_prop_restore_bytes(psk_prop, prior)?;
-
-        // Fetch the session's `param_key` schedule (the PAL hides the
-        // session-blob layout from us).
-        let param_key = pal.session_param_key(io, sess_id)?;
 
         // AEAD-open the envelope **in place** on the inbound request
         // buffer.  The destructured `req.psk_envelope` is a
