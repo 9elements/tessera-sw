@@ -17,7 +17,7 @@ Source of truth for the `TborStatus` enum:
 [`ddi/tbor/types/src/status.rs`](../src/status.rs).
 
 Test counts:
-* emu: 273 tests
+* emu: 281 tests
 * mock: 6 tests
 
 ## Legend
@@ -555,6 +555,34 @@ scopes, salt/info handling, deterministic derivation, and invalid requests.
 | Invalid HKDF request does not corrupt the active CU session | ✅ | `hkdf_derive::hkdf_derive_cu_invalid_request_preserves_session` | Invalid hash returns `InvalidArg`; subsequent valid HKDF derivation succeeds |
 
 ---
+
+## `GetPublicKey` (opcode in-session, gated)
+
+Unmasks a masked RSA / ECC private key and returns its wire public key, in
+the same format as `UnwrapKey` / `EccGenerateKey`.
+
+| Requirement | Status | Test | Notes |
+|---|---|---|---|
+| Returns the same public key as `EccGenerateKey` | ✅ 🔁 | `get_public_key::get_public_key_matches_ecc_generate_key_all_curves` | P-256, P-384, P-521 |
+| Returns the same public key as `UnwrapKey` for imported ECC keys | ✅ 🔁 | `get_public_key::get_public_key_matches_unwrapped_ecc_key` | P-256, P-384, P-521 |
+| Returns the same public key as `UnwrapKey` for RSA keys | ✅ 🔁 | `get_public_key::get_public_key_matches_unwrapped_rsa_key` | RSA-2048/3072/4096, CRT and non-CRT |
+| Crypto-User sessions are allowed | ✅ | `get_public_key::get_public_key_allowed_on_crypto_user_session` | |
+| A symmetric masked key is rejected | ✅ | `get_public_key::get_public_key_symmetric_key_rejected` | AES-256; `InvalidKeyType` |
+| A tampered masked key is rejected | ✅ | `get_public_key::get_public_key_tampered_masked_key_rejected` | `AesGcmDecryptTagDoesNotMatch` |
+| A session-scoped key is rejected in a different session | ✅ | `get_public_key::get_public_key_session_scoped_key_rejected_in_different_session` | `AesGcmDecryptTagDoesNotMatch` |
+| Default CO PSK is rejected | ✅ | `get_public_key::get_public_key_rejects_default_co_psk` | `DefaultPskMustRotate` |
+
+## `VerifyKey` (opcode in-session, gated)
+
+Authenticates a masked key of any kind without using it; empty response.
+
+| Requirement | Status | Test | Notes |
+|---|---|---|---|
+| Intact symmetric and asymmetric keys are accepted | ✅ 🔁 | `verify_key::verify_key_accepts_intact_keys` | AES-256, RSA, RSA-CRT, ECC |
+| Crypto-User sessions are allowed | ✅ | `verify_key::verify_key_allowed_on_crypto_user_session` | |
+| A tampered tag, metadata, or key material is rejected | ✅ 🔁 | `verify_key::verify_key_tampered_masked_key_rejected` | `AesGcmDecryptTagDoesNotMatch` |
+| A session-scoped key is rejected in a different session | ✅ | `verify_key::verify_key_session_scoped_key_rejected_in_different_session` | `AesGcmDecryptTagDoesNotMatch` |
+| Default CO PSK is rejected | ✅ | `verify_key::verify_key_rejects_default_co_psk` | `DefaultPskMustRotate` |
 
 ## Known gaps (summary)
 

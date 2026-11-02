@@ -94,6 +94,7 @@ mod ecdh_derive;
 mod evidence;
 mod get_cert;
 mod get_cert_chain_info;
+mod get_public_key;
 mod get_unwrapping_key;
 mod hash;
 mod hkdf_derive;
@@ -124,6 +125,7 @@ mod session_open_finish;
 mod session_open_init;
 mod status;
 mod unwrap_key;
+mod verify_key;
 
 pub use aes_encrypt_decrypt::*;
 pub use aes_generate_key::*;
@@ -141,6 +143,7 @@ pub use ecdh_derive::*;
 pub use evidence::*;
 pub use get_cert::*;
 pub use get_cert_chain_info::*;
+pub use get_public_key::*;
 pub use get_unwrapping_key::*;
 pub use hash::*;
 pub use hkdf_derive::*;
@@ -171,6 +174,7 @@ pub use session_open_finish::*;
 pub use session_open_init::*;
 pub use status::*;
 pub use unwrap_key::*;
+pub use verify_key::*;
 
 /// Trait implemented by host-side TBOR request value types.
 ///
