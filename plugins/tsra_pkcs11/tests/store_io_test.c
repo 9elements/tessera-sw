@@ -28,10 +28,12 @@
 #include <unistd.h>
 
 static int g_fail = 0;
+static int g_checks = 0;
 
 #define CHECK(cond, msg)                                                                           \
     do                                                                                             \
     {                                                                                              \
+        g_checks++;                                                                                \
         if (cond)                                                                                  \
         {                                                                                          \
             printf("  ok   : %s\n", (msg));                                                        \
@@ -234,6 +236,6 @@ int main(void)
         "cross-process lock serialized all increments (no lost updates)"
     );
 
-    printf(g_fail ? "\nSTORE_IO FAIL\n" : "\nSTORE_IO OK\n");
+    printf(g_fail ? "\nSTORE_IO FAIL (%d checks)\n" : "\nSTORE_IO OK (%d checks)\n", g_checks);
     return g_fail;
 }

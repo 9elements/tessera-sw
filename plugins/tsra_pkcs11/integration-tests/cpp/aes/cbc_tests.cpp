@@ -15,7 +15,9 @@
 #include <vector>
 
 #include "utils/aes_helpers.hpp"
+#include "utils/leak_gate.hpp"
 #include "utils/module.hpp"
+#include "utils/surviving_key.hpp"
 
 class aes_cbc : public UserSession
 {
@@ -444,6 +446,8 @@ TEST_F(aes_cbc, wrong_key_never_recovers_the_plaintext)
 
 TEST_F(aes_cbc, logout_tears_down_the_active_operation)
 {
+    SurvivingKey survivor(s_, key_, CKM_AES_CBC);
+    ASSERT_NO_FATAL_FAILURE(survivor.record());
     ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &pad_, key_));
     ASSERT_CKR_OK(p11()->C_Logout(s_));
     CK_ULONG need = 0;
@@ -452,6 +456,64 @@ TEST_F(aes_cbc, logout_tears_down_the_active_operation)
         p11()->C_Encrypt(s_, plain_.data(), 16, nullptr, &need)
     );
     EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, p11()->C_EncryptInit(s_, &pad_, key_));
+    GTEST_SKIP() << "B1: the key's blob dies with the device session at C_Logout";
+    // The public session key outlives the logout, and it is still the same key.
+    ASSERT_CKR_OK(login_user(s_));
+    ASSERT_NO_FATAL_FAILURE(survivor.check("a logout and login"));
+}
+
+TEST_F(aes_cbc, every_termination_path_gives_the_device_key_back)
+{
+    // Raw CBC over a last block of zeros: never valid CBC-PAD.
+    std::vector<CK_BYTE> bad_pad;
+    ASSERT_CKR_OK(crypt_oneshot(s_, true, &raw_, key_, std::vector<CK_BYTE>(48, 0), bad_pad));
+    CK_ULONG need = 0;
+    std::vector<CK_BYTE> out;
+    std::vector<TerminationPath> paths = {
+        { "completion", [&] { ASSERT_CKR_OK(crypt_oneshot(s_, true, &pad_, key_, plain_, out)); } },
+        { "multi-part final",
+          [&] { ASSERT_CKR_OK(crypt_multipart(s_, true, &pad_, key_, plain_, 16, out)); } },
+        { "bad arguments",
+          [&] {
+              ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &pad_, key_));
+              ASSERT_CKR(
+                  CKR_ARGUMENTS_BAD,
+                  p11()->C_Encrypt(s_, plain_.data(), 40, nullptr, nullptr)
+              );
+          } },
+        { "partial block",
+          [&] {
+              ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &raw_, key_));
+              ASSERT_CKR(
+                  CKR_DATA_LEN_RANGE,
+                  p11()->C_Encrypt(s_, plain_.data(), 30, nullptr, &need)
+              );
+          } },
+        { "bad padding",
+          [&] {
+              ASSERT_CKR(
+                  CKR_ENCRYPTED_DATA_INVALID,
+                  crypt_oneshot(s_, false, &pad_, key_, bad_pad, out)
+              );
+          } },
+        { "session close",
+          [&] {
+              CK_SESSION_HANDLE other = 0;
+              ASSERT_CKR_OK(
+                  p11()->C_OpenSession(kSlot, CKF_SERIAL_SESSION, nullptr, nullptr, &other)
+              );
+              ASSERT_CKR_OK(p11()->C_EncryptInit(other, &pad_, key_));
+              ASSERT_CKR_OK(p11()->C_CloseSession(other));
+          } },
+    };
+    // Each fresh operation brings a key of its own: the fixture key does not
+    // outlive the gate's logout yet (B1).
+    auto fresh = [&] {
+        CK_OBJECT_HANDLE k = 0;
+        CK_RV rv = gen_aes_key(s_, 32, CK_TRUE, CK_TRUE, "leak-gate-fresh", &k);
+        return (rv == CKR_OK) ? crypt_oneshot(s_, true, &pad_, k, plain_, out) : rv;
+    };
+    ASSERT_NO_FATAL_FAILURE(leak_gate(s_, paths, fresh));
 }
 
 TEST_F(aes_cbc, closing_a_session_with_an_active_operation_is_clean)

@@ -156,4 +156,8 @@ pinned revision and requires every test on its include-list to pass, which is
 how spec behaviour is kept from regressing as pieces land (the list grows with
 them — see the README there). The CI workflow
 (`.github/workflows/pkcs11.yml`) runs all of these on pushes/PRs to the
-staging branch.
+staging branch: the unit harnesses under UBSan and under ASan
+(`tests/build_units.sh`), and the functional suite on the memory store, on the
+file store (`TSRA_PKCS11_PERSIST=1`) and against an ASan build of the module.
+`tests/HARDWARE.md` lists what only a device can show, and how to run the same
+suites on one.

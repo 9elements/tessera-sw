@@ -2,14 +2,16 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 #
-# Runs the checks of the CI workflow's build-and-drive job plus the
-# standalone unit harnesses, in one go. Builds the standalone
-# no-device module and drives it with OpenSC pkcs11-tool, and runs the
-# device-free unit tests; if the mock-backed module has been built
-# (cargo build -p tsra_pkcs11 --features mock), it also runs the C_Login
-# provisioning ceremony, a pkcs11-tool AES keygen, the gtest functional suite
-# (integration-tests/cpp) and the pkcs11test conformance gate
-# (tests/pkcs11test) against the simulator.
+# Runs the checks of the CI workflow's build-and-drive and unit-tests jobs in
+# one go. Builds the standalone no-device module and drives it with OpenSC
+# pkcs11-tool, and runs the device-free unit harnesses under UBSan and ASan
+# (build_units.sh); if the mock-backed module has been built (cargo build -p
+# tsra_pkcs11 --features mock; TSRA_PKCS11_MODULE overrides its path), it also
+# runs the C_Login provisioning ceremony, a pkcs11-tool AES keygen, the gtest
+# functional suite (integration-tests/cpp) on the memory and the file object
+# store, and the pkcs11test conformance gate (tests/pkcs11test) against the
+# simulator. The workflow's ASan module build (functional-asan) is not
+# repeated here.
 #
 # pkcs11-tool is expected locally (extracted from a distro package, no system
 # install). Point PKCS11_TESTING at that directory; it defaults to the
@@ -32,51 +34,9 @@ gcc -shared -fPIC -Wall -Wextra -Wno-unknown-pragmas \
 MOD="$WORK/tsra_pkcs11.so"
 echo "  built $MOD ; exported C_ symbols: $(nm -D "$MOD" | grep -c ' T C_')"
 
-echo; echo "== digest KAT (NIST vectors, no device) =="
-gcc -Wall -Wextra -Werror \
-    -I"$PLUGIN/include/pkcs11-v3.1" -I"$PLUGIN/src" \
-    "$HERE/digest_kat_test.c" "$PLUGIN/src/tsra_pkcs11_digest.c" \
-    -o "$WORK/digest_kat_test"
-"$WORK/digest_kat_test"
-
-echo; echo "== object-store unit tests (no device) =="
-store_src="$PLUGIN/src/tsra_pkcs11_objstore_file.c $PLUGIN/src/tsra_pkcs11_objstore_mem.c \
-$PLUGIN/src/tsra_pkcs11_store_io.c $PLUGIN/src/tsra_pkcs11_store_record.c"
-inc="-I$PLUGIN/include/pkcs11-v3.1 -I$PLUGIN/src"
-# shellcheck disable=SC2086 # the flag/source lists are meant to split
-gcc -Wall -Wextra -Werror $inc "$HERE/store_io_test.c" \
-    "$PLUGIN/src/tsra_pkcs11_store_io.c" -o "$WORK/store_io_test"
-# shellcheck disable=SC2086
-gcc -Wall -Wextra -Werror $inc "$HERE/record_test.c" \
-    "$PLUGIN/src/tsra_pkcs11_store_record.c" -o "$WORK/record_test"
-# shellcheck disable=SC2086
-gcc -Wall -Wextra -Werror $inc "$HERE/objstore_file_test.c" $store_src \
-    -o "$WORK/objstore_file_test" -lpthread
-# shellcheck disable=SC2086
-gcc -Wall -Wextra -Werror $inc "$HERE/objstore_stress_test.c" $store_src \
-    -o "$WORK/objstore_stress_test" -lpthread
-"$WORK/store_io_test" | tail -n 1
-"$WORK/record_test" | tail -n 1
-"$WORK/objstore_file_test" | tail -n 1
-"$WORK/objstore_stress_test" | tail -n 1
-
-echo; echo "== AES keygen template + status map unit test (no device, UBSan) =="
-# UBSan: the decoder reads caller-supplied pointers with no alignment
-# guarantee, and the harness feeds it a deliberately misaligned template.
-gcc -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
-    -I"$PLUGIN/include/pkcs11-v3.1" -I"$PLUGIN/src" \
-    "$HERE/aes_template_test.c" \
-    "$PLUGIN/src/tsra_pkcs11_template.c" "$PLUGIN/src/tsra_pkcs11_status.c" \
-    -o "$WORK/aes_template_test"
-"$WORK/aes_template_test"
-
-echo; echo "== C_SetAttributeValue policy unit test (no device, UBSan) =="
-gcc -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
-    -I"$PLUGIN/include/pkcs11-v3.1" -I"$PLUGIN/src" \
-    "$HERE/attr_policy_test.c" \
-    "$PLUGIN/src/tsra_pkcs11_attr_policy.c" "$PLUGIN/src/tsra_pkcs11_template.c" \
-    -o "$WORK/attr_policy_test"
-"$WORK/attr_policy_test" | tail -n 1
+echo; echo "== unit harnesses (no device): UBSan, then ASan =="
+"$HERE/build_units.sh" "$WORK/units-ubsan"
+SANITIZE=asan "$HERE/build_units.sh" "$WORK/units-asan"
 
 if [ -f "$PKCS11_TESTING/env.sh" ]; then
     # shellcheck disable=SC1091
@@ -101,7 +61,7 @@ for pair in SHA-1:sha1sum SHA256:sha256sum SHA384:sha384sum SHA512:sha512sum; do
 done
 
 # --- mock-backed C_Login ceremony (needs the integrated build + mock DDI) ----
-HSMMOD="$REPO/target/debug/tsra_pkcs11.so"
+HSMMOD="${TSRA_PKCS11_MODULE:-$REPO/target/debug/tsra_pkcs11.so}"
 if [ -f "$HSMMOD" ]; then
     echo; echo "== mock-backed: C_Login provisioning ceremony =="
     echo "   (build it with: cargo build -p tsra_pkcs11 --features mock)"
@@ -140,13 +100,23 @@ if [ -f "$HSMMOD" ]; then
     TSRA_PKCS11_MODULE="$HSMMOD" ctest --test-dir "$WORK/cpp-tests" --output-on-failure \
         --no-tests=error || { echo "   (functional suite failed)"; exit 1; }
 
+    echo; echo "== mock-backed: gtest functional suite on the file store (PERSIST=1) =="
+    # Not pre-created: the module must create the store directory owner-only.
+    store="$WORK/pkcs11-store"
+    TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$store" TSRA_PKCS11_MODULE="$HSMMOD" \
+        ctest --test-dir "$WORK/cpp-tests" --output-on-failure --no-tests=error \
+        || { echo "   (functional suite on the file store failed)"; exit 1; }
+    mode="$(stat -c %a "$store")"
+    [ "$mode" = 700 ] || { echo "   (store directory mode is $mode, not 700)"; exit 1; }
+    echo "   store directory created with mode $mode"
+
     echo; echo "== mock-backed: pkcs11test conformance gate =="
-    # Clones and builds the tool on first use; the work directory is reused.
-    "$HERE/pkcs11test/run.sh" "$HSMMOD" \
-        "${XDG_CACHE_HOME:-$HOME/.cache}/tsra-pkcs11test" \
+    # Clones and builds the tool on first use; the work directory is reused. It
+    # lives in this checkout's target/ so two worktrees never share a clone.
+    "$HERE/pkcs11test/run.sh" "$HSMMOD" "$REPO/target/pkcs11test" \
         || { echo "   (conformance gate failed)"; exit 1; }
 else
-    echo; echo "== mock-backed checks skipped (no target/debug/tsra_pkcs11.so) =="
+    echo; echo "== mock-backed checks skipped (no $HSMMOD) =="
 fi
 
 echo; echo "All validation steps completed."

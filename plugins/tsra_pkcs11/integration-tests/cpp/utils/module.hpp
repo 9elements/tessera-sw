@@ -21,6 +21,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "tsra_pkcs11_compat.h"
@@ -136,6 +137,53 @@ inline CK_FUNCTION_LIST_PTR p11()
     return Pkcs11Module::instance().fns();
 }
 
+/// TSRA_PKCS11_HW=1: the module under test drives a real device, not the mock.
+inline bool on_hardware()
+{
+    const char *e = std::getenv("TSRA_PKCS11_HW");
+    return (e != nullptr) && (std::strcmp(e, "1") == 0);
+}
+
+/// The first statement of a case only hardware can decide (firmware checks,
+/// power cycles, a second process on a provisioned partition). Such a case is
+/// named *_hw and is skipped unless TSRA_PKCS11_HW=1; `why` says what the mock
+/// cannot show. tests/HARDWARE.md lists the checklist items behind them.
+#define HW_ONLY(why)                                                                               \
+    do                                                                                             \
+    {                                                                                              \
+        ASSERT_TRUE(                                                                               \
+            std::string_view(::testing::UnitTest::GetInstance()->current_test_info()->name())      \
+                .ends_with("_hw")                                                                  \
+        ) << "a hardware-only case is named *_hw";                                                 \
+        if (!on_hardware())                                                                        \
+        {                                                                                          \
+            GTEST_SKIP() << "hardware only (TSRA_PKCS11_HW=1): " << (why);                         \
+        }                                                                                          \
+    } while (0)
+
+/// The first statement of a case that pins a mock-only model (capacities, one
+/// fresh partition per process); skipped when TSRA_PKCS11_HW=1.
+#define MOCK_ONLY(why)                                                                             \
+    do                                                                                             \
+    {                                                                                              \
+        if (on_hardware())                                                                         \
+        {                                                                                          \
+            GTEST_SKIP() << "mock only: " << (why);                                                \
+        }                                                                                          \
+    } while (0)
+
+/// C_Login as CKU_USER with the test PIN.
+inline CK_RV login_user(CK_SESSION_HANDLE s)
+{
+    std::string pin = Pkcs11Module::pin();
+    return p11()->C_Login(
+        s,
+        CKU_USER,
+        reinterpret_cast<CK_UTF8CHAR_PTR>(pin.data()),
+        static_cast<CK_ULONG>(pin.size())
+    );
+}
+
 class ModuleEnvironment : public ::testing::Environment
 {
   public:
@@ -228,13 +276,7 @@ class UserSession : public PublicSession
         {
             return;
         }
-        std::string pin = Pkcs11Module::pin();
-        ASSERT_CKR_OK(p11()->C_Login(
-            s_,
-            CKU_USER,
-            reinterpret_cast<CK_UTF8CHAR_PTR>(pin.data()),
-            static_cast<CK_ULONG>(pin.size())
-        ));
+        ASSERT_CKR_OK(login_user(s_));
     }
     void TearDown() override
     {

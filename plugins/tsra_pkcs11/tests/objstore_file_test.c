@@ -33,10 +33,12 @@
 #include <unistd.h>
 
 static int g_fail = 0;
+static int g_checks = 0;
 
 #define CHECK(cond, msg)                                                                           \
     do                                                                                             \
     {                                                                                              \
+        g_checks++;                                                                                \
         if (cond)                                                                                  \
         {                                                                                          \
             printf("  ok   : %s\n", (msg));                                                        \
@@ -759,6 +761,9 @@ int main(void)
         "child process reads the persisted token object and a persisted counter"
     );
 
-    printf(g_fail ? "\nOBJSTORE_FILE FAIL\n" : "\nOBJSTORE_FILE OK\n");
+    printf(
+        g_fail ? "\nOBJSTORE_FILE FAIL (%d checks)\n" : "\nOBJSTORE_FILE OK (%d checks)\n",
+        g_checks
+    );
     return g_fail;
 }

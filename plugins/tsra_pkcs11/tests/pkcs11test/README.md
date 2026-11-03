@@ -39,10 +39,12 @@ module is complete — pkcs11test's `SKIP_IF_UNIMPLEMENTED` guard sits at
 failures. Gating on the listed names keeps every behaviour that once passed
 from regressing while the list grows piece by piece.
 
-**Policy:** when a piece lands, run the tool without a filter, add every newly
-green name to `include-list.txt`, and mention the additions in the commit
-message. Never remove a name without saying why. A test pkcs11test skips
-belongs off the list until the feature lands, because it would assert nothing.
+**Policy:** when a piece lands, run `offlist.sh` (below), add every newly
+green name to `include-list.txt`, raise `FLOOR` in `run.sh` to the new count,
+and mention the additions in the commit message. `run.sh` fails when the list
+names fewer tests than `FLOOR`, so a name cannot drop off silently; never
+remove one without saying why. A test pkcs11test skips belongs off the list
+until the feature lands, because it would assert nothing.
 
 Flags: `-X` disables the Security Officer tests (this token has no SO
 credential — the TSRA DDI has none); `-I` (token initialisation) is not
@@ -125,11 +127,15 @@ cargo build -p tsra_pkcs11 --features mock
 plugins/tsra_pkcs11/tests/pkcs11test/run.sh target/debug/tsra_pkcs11.so
 ```
 
-`tests/run_validation.sh` runs it too, when the mock module is present. For the
-full picture rather than the gate, run the built tool from the work directory
-without a filter:
+`tests/run_validation.sh` runs it too, when the mock module is present.
+
+For the full picture rather than the gate, `offlist.sh` takes the same
+arguments: it runs the gate, then the tool without a filter, and rewrites
+`offlist.md` with every test that is not on the list, sorted into a bucket
+that says why. It fails when an off-list test passes and asserts something
+(that test belongs on the list) or when a name matches no bucket rule (add
+one to `offlist.sh`).
 
 ```sh
-cd "${TMPDIR:-/tmp}/tsra-pkcs11test/src"
-./pkcs11test -m tsra_pkcs11.so -l <repo>/target/debug -s 0 -u 1234 -X
+plugins/tsra_pkcs11/tests/pkcs11test/offlist.sh target/debug/tsra_pkcs11.so
 ```

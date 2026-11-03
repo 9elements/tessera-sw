@@ -23,6 +23,9 @@ REPO="${PKCS11TEST_REPO:-https://github.com/google/pkcs11test.git}"
 REV="${PKCS11TEST_REV:-2cbe462c62bacf537b9a9a427a1c053d8c2e4760}"
 PIN="${TSRA_PKCS11_TEST_PIN:-1234}"
 INCLUDE="$HERE/include-list.txt"
+# The include-list only grows: fewer names than this fails the gate. Raise the
+# floor when names are added; lowering it is a deliberate edit with a reason.
+FLOOR=140
 PATCH="$HERE/hsm-profile-login.patch"
 SRC="$WORK/src"
 
@@ -43,7 +46,8 @@ mapfile -t NAMES < <(
     sed -e 's/\r$//' -e 's/[[:space:]]*$//' "$INCLUDE" |
         grep -v -E '^[[:space:]]*(#|$)' | sort -u
 )
-[ "${#NAMES[@]}" -gt 0 ] || fail "include-list names no tests: $INCLUDE"
+[ "${#NAMES[@]}" -ge "$FLOOR" ] ||
+    fail "include-list names ${#NAMES[@]} tests, fewer than its floor of $FLOOR: $INCLUDE"
 
 # --- 2. Source at the pinned revision, fixture patch applied ----------------
 mkdir -p "$WORK"
