@@ -13,7 +13,8 @@
  *
  * Covers: token vs session routing, the private login gate, the v1
  * private-secret refusal, sensitive-attribute hiding, two-call sizing,
- * counter-first no-reuse of handles, destroy, and cross-process persistence
+ * counter-first no-reuse of handles, destroy, a lost or empty token.meta never
+ * letting a create replace a surviving object, and cross-process persistence
  * (a child process opens a fresh store on the same directory and reads the
  * token object the parent created, then observes the persisted counter).
  */
@@ -704,6 +705,54 @@ int main(void)
     );
     make_object(&s, SLOT, CK_FALSE, CK_TRUE, CK_FALSE, "b", NULL, 0, CK_FALSE, &b);
     CHECK((b & ~TOKEN_FLAG) > (a & ~TOKEN_FLAG), "handle counter never reuses a number");
+
+    /* --- a lost or emptied counter: the numbers it hands out again are
+           still taken, and a create must not replace their objects --- */
+    const CK_SLOT_ID META_SLOT = SLOT + 3;
+    char meta_path[512];
+    snprintf(
+        meta_path,
+        sizeof(meta_path),
+        "%s/slot-%lu/token.meta",
+        root,
+        (unsigned long)META_SLOT
+    );
+    CK_OBJECT_HANDLE keep = 0, again = 0;
+    CHECK(
+        make_object(&s, META_SLOT, CK_FALSE, CK_TRUE, CK_FALSE, "keep", NULL, 0, CK_FALSE, &keep) ==
+            CKR_OK,
+        "meta: create the surviving object"
+    );
+    CHECK(unlink(meta_path) == 0, "meta: token.meta deleted");
+    CHECK(
+        make_object(&s, META_SLOT, CK_FALSE, CK_TRUE, CK_FALSE, "new", NULL, 0, CK_FALSE, &again) ==
+            CKR_FUNCTION_FAILED,
+        "meta: a create that would reuse its number fails"
+    );
+    CHECK(
+        read_label(&s, META_SLOT, CK_FALSE, keep, lbuf, sizeof(lbuf), &llen) == CKR_OK &&
+            llen == 4 && memcmp(lbuf, "keep", 4) == 0,
+        "meta: the surviving object is intact"
+    );
+    int mfd = open(meta_path, O_WRONLY | O_TRUNC);
+    CHECK(mfd >= 0, "meta: token.meta emptied");
+    if (mfd >= 0)
+    {
+        close(mfd);
+    }
+    CHECK(
+        make_object(&s, META_SLOT, CK_FALSE, CK_TRUE, CK_FALSE, "new", NULL, 0, CK_FALSE, &again) ==
+            CKR_FUNCTION_FAILED,
+        "meta: an empty token.meta is corrupt, not absent"
+    );
+    struct stat msb;
+    CHECK(
+        stat(meta_path, &msb) == 0 && msb.st_size == 0 &&
+            read_label(&s, META_SLOT, CK_FALSE, keep, lbuf, sizeof(lbuf), &llen) == CKR_OK &&
+            llen == 4,
+        "meta: nothing was written, the surviving object is intact"
+    );
+    s.ops->destroy(s.ctx, META_SLOT, CK_FALSE, keep);
 
     CK_OBJECT_HANDLE last = b; /* highest handle so far */
     s.ops->teardown(s.ctx);

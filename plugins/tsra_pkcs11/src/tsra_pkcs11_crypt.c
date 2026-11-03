@@ -256,18 +256,19 @@ static CK_RV cipher_init(
         tsra_pkcs11_unlock();
         return CKR_SESSION_HANDLE_INVALID;
     }
-    /* Precedence as in C_GenerateKey — handle, arguments, mechanism, then login
-     * state — with the operation-state check between arguments and mechanism,
-     * as in C_DigestInit. */
+    if (pMechanism == NULL_PTR)
+    {
+        tsra_pkcs11_session_cancel_op(s, want);
+        tsra_pkcs11_unlock();
+        return CKR_OK;
+    }
+    /* Precedence as in C_DigestInit: handle, the NULL-mechanism cancel above,
+     * operation state, mechanism and its parameter, then login state. */
     CK_RV rv = CKR_OK;
     const tsra_pkcs11_cipher_mech *cm = NULL;
     CK_GCM_PARAMS gcm;
     memset(&gcm, 0, sizeof(gcm));
-    if (pMechanism == NULL_PTR)
-    {
-        rv = CKR_ARGUMENTS_BAD;
-    }
-    else if (s->op != P11_OP_NONE)
+    if (s->op != P11_OP_NONE)
     {
         rv = CKR_OPERATION_ACTIVE;
     }

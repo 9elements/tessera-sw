@@ -48,6 +48,8 @@ HARNESS=(
     "objstore_stress_test $STORE"
     "aes_template_test tsra_pkcs11_template.c tsra_pkcs11_status.c"
     "attr_policy_test tsra_pkcs11_attr_policy.c tsra_pkcs11_template.c"
+    "mech_table_test tsra_pkcs11_mech.c tsra_pkcs11_template.c tsra_pkcs11_digest.c"
+    "config_test tsra_pkcs11_config.c"
 )
 
 echo "unit harnesses (${SANITIZE:-ubsan}):"

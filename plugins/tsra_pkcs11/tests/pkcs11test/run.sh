@@ -25,7 +25,7 @@ PIN="${TSRA_PKCS11_TEST_PIN:-1234}"
 INCLUDE="$HERE/include-list.txt"
 # The include-list only grows: fewer names than this fails the gate. Raise the
 # floor when names are added; lowering it is a deliberate edit with a reason.
-FLOOR=140
+FLOOR=144
 PATCH="$HERE/hsm-profile-login.patch"
 SRC="$WORK/src"
 

@@ -62,19 +62,6 @@ void tsra_pkcs11_pad_str(CK_UTF8CHAR *dst, size_t dstlen, const char *src)
     memset(dst + n, ' ', dstlen - n); /* PKCS#11 fixed-width fields are space-padded */
 }
 
-void tsra_pkcs11_wipe(void *p, size_t n)
-{
-    if (p == NULL)
-    {
-        return;
-    }
-    volatile unsigned char *v = (volatile unsigned char *)p;
-    for (size_t i = 0; i < n; i++)
-    {
-        v[i] = 0;
-    }
-}
-
 tsra_pkcs11_session_t *tsra_pkcs11_session_lookup(CK_SESSION_HANDLE h)
 {
     if (h == CK_INVALID_HANDLE)
@@ -133,9 +120,32 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
      * file backend is opt-in via TSRA_PKCS11_PERSIST and needs its root dir;
      * unset keeps the in-memory backend, so the default path is unchanged. */
     tsra_pkcs11_config cfg;
-    tsra_pkcs11_config_load(&cfg);
-    CK_RV rv = cfg.store_persist ? tsra_pkcs11_objstore_file_create(&g_tsra_pkcs11.store, &cfg)
-                                 : tsra_pkcs11_objstore_mem_create(&g_tsra_pkcs11.store);
+    CK_RV rv = tsra_pkcs11_config_load(&cfg);
+    if (rv != CKR_OK)
+    {
+        TSRA_PKCS11_LOG(
+            "C_Initialize: %s is empty, contains \"..\" or is longer than %d bytes",
+            TSRA_PKCS11_ENV_STORE_DIR,
+            TSRA_PKCS11_STORE_DIR_LEN - 1
+        );
+    }
+    else if (cfg.store_persist)
+    {
+        rv = tsra_pkcs11_objstore_file_create(&g_tsra_pkcs11.store, &cfg);
+        if (rv != CKR_OK)
+        {
+            TSRA_PKCS11_LOG(
+                "C_Initialize: store dir %s unusable (rv 0x%lx): it must be a directory this "
+                "user owns with mode 0700, or absent with an existing parent",
+                cfg.store_dir,
+                (unsigned long)rv
+            );
+        }
+    }
+    else
+    {
+        rv = tsra_pkcs11_objstore_mem_create(&g_tsra_pkcs11.store);
+    }
     /* The config carries credential and OBK bytes and is only needed to select
      * and seed the store; wipe it before any return (error paths included). */
     tsra_pkcs11_config_clear(&cfg);
@@ -196,7 +206,6 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved)
         tsra_pkcs11_hsm_logout(g_tsra_pkcs11.slots[i].hsm_session);
         g_tsra_pkcs11.slots[i].hsm_session = 0;
         g_tsra_pkcs11.slots[i].user_logged_in = false;
-        g_tsra_pkcs11.slots[i].so_logged_in = false;
     }
     tsra_pkcs11_hsm_close_all();
     if (g_tsra_pkcs11.store.ctx != NULL)

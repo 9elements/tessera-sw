@@ -33,6 +33,7 @@
 #include "tsra_pkcs11_objstore.h"
 #include "tsra_pkcs11_store_io.h"
 #include "tsra_pkcs11_store_record.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -161,7 +162,7 @@ static CK_RV rec_set_attr(
     }
     if (a->value != NULL)
     {
-        memset(a->value, 0, a->len);
+        tsra_pkcs11_wipe(a->value, a->len);
         free(a->value);
     }
     a->value = nv;
@@ -216,9 +217,15 @@ static void object_name(CK_ULONG num, char *out, size_t outlen)
 
 /* ---- disk-backed token object operations -------------------------------- */
 
-/* Encode `o` and atomically (re)write it as <num>.object in `dir`. The encoded
- * buffer is wiped after the write since it may hold attribute bytes. */
-static CK_RV rewrite_token_object(const char *dir, CK_ULONG num, const tsra_pkcs11_rec_object *o)
+/* Encode `o` and atomically write it as <num>.object in `dir`, replacing an
+ * existing file only when `replace` is set. The encoded buffer is wiped after
+ * the write since it may hold attribute bytes. */
+static CK_RV write_token_object(
+    const char *dir,
+    CK_ULONG num,
+    const tsra_pkcs11_rec_object *o,
+    bool replace
+)
 {
     unsigned char *buf = NULL;
     size_t blen = 0;
@@ -239,11 +246,12 @@ static CK_RV rewrite_token_object(const char *dir, CK_ULONG num, const tsra_pkcs
     {
         char name[P11_FILE_OBJ_NAME_LEN];
         object_name(num, name, sizeof(name));
-        rv = tsra_pkcs11_store_write(dir, name, buf, blen);
+        rv = replace ? tsra_pkcs11_store_write(dir, name, buf, blen)
+                     : tsra_pkcs11_store_create(dir, name, buf, blen);
     }
     if (buf != NULL)
     {
-        memset(buf, 0, blen);
+        tsra_pkcs11_wipe(buf, blen);
         free(buf);
     }
     return rv;
@@ -349,7 +357,9 @@ static CK_RV create_token_object(
     }
     tsra_pkcs11_rec_object obj = { ra, count, NULL, 0 };
 
-    rv = rewrite_token_object(dir, n, &obj);
+    /* Never over an existing file: a lost or reset token.meta hands out a
+     * number some surviving object may still hold. */
+    rv = write_token_object(dir, n, &obj, false);
     free(ra);
     tsra_pkcs11_store_unlock(lock_fd);
     if (rv != CKR_OK)
@@ -392,6 +402,7 @@ static CK_RV load_visible_token_object(
         return CKR_OBJECT_HANDLE_INVALID;
     }
     rv = tsra_pkcs11_record_decode(buf, blen, out);
+    tsra_pkcs11_wipe(buf, blen); /* masked key body and attribute values */
     free(buf);
     if (rv != CKR_OK)
     {
@@ -615,7 +626,7 @@ static CK_RV set_attr_token(
     }
     if ((rv == CKR_OK) && (count > 0))
     {
-        rv = rewrite_token_object(dir, h & ~P11_FILE_TOKEN_FLAG, &o);
+        rv = write_token_object(dir, h & ~P11_FILE_TOKEN_FLAG, &o, true);
     }
     tsra_pkcs11_record_free(&o);
     tsra_pkcs11_store_unlock(lock_fd);
@@ -723,9 +734,10 @@ static int parse_object_name(const char *name, CK_ULONG *num)
 
 /*
  * Append every visible token object in `slot` matching `tmpl` to the cursor.
- * Lock-free by design: each object write is an atomic rename and a deletion is
- * tolerated (a file that vanishes mid-scan is skipped), so a scan never reads a
- * torn record; an object added concurrently may be missed, which PKCS#11 allows.
+ * Lock-free by design: each object write is an atomic rename or link and a
+ * deletion is tolerated (a file that vanishes mid-scan is skipped), so a scan
+ * never reads a torn record; an object added concurrently may be missed, which
+ * PKCS#11 allows.
  */
 static CK_RV collect_token_matches(
     file_store *st,
@@ -763,6 +775,7 @@ static CK_RV collect_token_matches(
         }
         tsra_pkcs11_rec_object o;
         int decoded = (tsra_pkcs11_record_decode(buf, blen, &o) == CKR_OK);
+        tsra_pkcs11_wipe(buf, blen);
         free(buf);
         if (!decoded)
         {
@@ -930,12 +943,12 @@ static CK_RV set_key_body_token(
     }
     if (o.body != NULL)
     {
-        memset(o.body, 0, o.body_len);
+        tsra_pkcs11_wipe(o.body, o.body_len);
         free(o.body);
     }
     o.body = nb;
     o.body_len = len;
-    rv = rewrite_token_object(dir, h & ~P11_FILE_TOKEN_FLAG, &o);
+    rv = write_token_object(dir, h & ~P11_FILE_TOKEN_FLAG, &o, true);
     tsra_pkcs11_record_free(&o);
     tsra_pkcs11_store_unlock(lock_fd);
     return rv;

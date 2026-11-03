@@ -360,11 +360,8 @@ TEST_F(aes_cbc, init_reports_the_session_handle_first)
     );
 }
 
-TEST_F(aes_cbc, init_reports_arguments_then_operation_state_then_mechanism)
+TEST_F(aes_cbc, init_reports_operation_state_then_mechanism)
 {
-    EXPECT_CKR(CKR_ARGUMENTS_BAD, p11()->C_EncryptInit(s_, nullptr, key_));
-    EXPECT_CKR(CKR_ARGUMENTS_BAD, p11()->C_DecryptInit(s_, nullptr, key_));
-
     // An AES mechanism this token does not run.
     CK_MECHANISM ecb = { CKM_AES_ECB, nullptr, 0 };
     EXPECT_CKR(CKR_MECHANISM_INVALID, p11()->C_EncryptInit(s_, &ecb, key_));
@@ -406,9 +403,39 @@ TEST_F(aes_cbc, init_requires_login)
     EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, p11()->C_EncryptInit(s_, &pad_, key_));
     EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, p11()->C_DecryptInit(s_, &pad_, key_));
     // Still: a malformed request is reported before the login state.
-    EXPECT_CKR(CKR_ARGUMENTS_BAD, p11()->C_EncryptInit(s_, nullptr, key_));
+    CK_MECHANISM short_iv = { CKM_AES_CBC_PAD, iv_, 12 };
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &short_iv, key_));
     CK_MECHANISM ecb = { CKM_AES_ECB, nullptr, 0 };
     EXPECT_CKR(CKR_MECHANISM_INVALID, p11()->C_EncryptInit(s_, &ecb, key_));
+}
+
+TEST_F(aes_cbc, null_mechanism_cancels_only_its_own_operation)
+{
+    EXPECT_CKR_OK(p11()->C_EncryptInit(s_, nullptr, key_)) << "nothing active: nothing to cancel";
+    EXPECT_CKR_OK(p11()->C_DecryptInit(s_, nullptr, kInvalidObject)) << "the key is not looked at";
+
+    CK_ULONG need = 0;
+    ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &pad_, key_));
+    EXPECT_CKR_OK(p11()->C_DecryptInit(s_, nullptr, key_));
+    EXPECT_CKR_OK(p11()->C_Encrypt(s_, plain_.data(), 40, nullptr, &need))
+        << "a decrypt cancel leaves the encrypt operation alone";
+    EXPECT_CKR_OK(p11()->C_EncryptInit(s_, nullptr, key_));
+    EXPECT_CKR(
+        CKR_OPERATION_NOT_INITIALIZED,
+        p11()->C_Encrypt(s_, plain_.data(), 40, nullptr, &need)
+    );
+
+    // C_SessionCancel releases the cipher state the same way.
+    ASSERT_CKR_OK(p11()->C_DecryptInit(s_, &pad_, key_));
+    EXPECT_CKR_OK(p11_3()->C_SessionCancel(s_, CKF_DECRYPT));
+    EXPECT_CKR(
+        CKR_OPERATION_NOT_INITIALIZED,
+        p11()->C_Decrypt(s_, plain_.data(), 16, nullptr, &need)
+    );
+
+    // Either way the session is free for the next operation.
+    std::vector<CK_BYTE> ct;
+    ASSERT_NO_FATAL_FAILURE(encrypt_plain_pad(ct));
 }
 
 // ---------------------------------------------------------------------------

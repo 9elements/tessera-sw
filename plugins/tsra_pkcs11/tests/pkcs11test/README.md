@@ -79,7 +79,7 @@ unchanged against the logged-in profile. Public-object and digest tests need no
 login and are untouched. Auto-opening a device session for public sessions was
 considered and rejected — it would defeat the login.
 
-## What the gate covers today (140 of 330)
+## What the gate covers today (144 of 330)
 
 Digests (SHA-1/256/384/512, one-shot and multi-part, sizing, the operation
 state machine), the library/slot/session/login surface, public data objects
@@ -87,13 +87,15 @@ state machine), the library/slot/session/login surface, public data objects
 decoding, the AES-CBC cipher tests (one-shot round trip, sizing, wrong key,
 IV validation, argument errors; multi-part argument errors, the final-call
 length rules and the one-shot/multi-part mode rule) and the operation-lifetime
-rules on the cipher and digest entry points.
+rules on the cipher and digest entry points, and the answers of the
+random-number functions on a token without a generator (`CKR_RANDOM_NO_RNG`).
 
-A full run reports 165 passing, but 25 of those assert nothing and are
-deliberately **not** on the list: 23 that pkcs11test skips (the MD5 digest
-parameter, token initialisation, the SO logins suppressed by `-X`,
-`C_GetOperationState`, the dual-function digest+encrypt) and the two AES-ECB
-IV cases, whose bodies return immediately for a mechanism that has no IV. They
+A full run reports 170 passing, but 26 of those are deliberately **not** on
+the list, because they assert nothing: 23 that pkcs11test skips (the MD5
+digest parameter, token initialisation, the SO logins suppressed by `-X`,
+`C_GetOperationState`, the dual-function digest+encrypt), the two AES-ECB IV
+cases, whose bodies return immediately for a mechanism that has no IV, and
+`GenerateRandomNone`, which has nothing to check without a generator. They
 come onto the list when the feature behind them lands.
 
 Not yet covered, by bucket: `EncryptDecryptParts`, which expects one block out
@@ -101,22 +103,32 @@ of every one-block `C_EncryptUpdate`, while the SDK's CBC stream holds back the
 last full block until the final call (the spec allows that; the case joins the
 list once the SDK releases unpadded blocks at once), mechanisms this module
 does not implement
-(DES/3DES/AES-ECB, RSA, EC, sign/verify, HMAC, key pairs, wrap/unwrap, random
-number generation beyond the pre-`C_Initialize` checks), entry points that are
-stubs (`C_CopyObject`, `C_DigestKey`), key import through `C_CreateObject` with
-`CKA_VALUE` (the SDK has none), and a few tests whose expectations assume a
-soft token — for example `EncryptDecryptInitInvalid` wants
-`CKR_KEY_TYPE_INCONSISTENT` for an advertised-but-unimplemented RSA mechanism,
-which resolves when the mechanism table stops advertising it.
+(DES/3DES/AES-ECB, RSA, EC, sign/verify, HMAC, key pairs, wrap/unwrap),
+entry points that are stubs (`C_CopyObject`, `C_DigestKey`), key import
+through `C_CreateObject` with `CKA_VALUE` (the SDK has none), and a few tests
+whose expectations assume a soft token or predate v3.0. For example
+`EncryptDecryptInitInvalid` wants `CKR_KEY_TYPE_INCONSISTENT` for
+`CKM_RSA_PKCS` on an AES key, where this token, which does not offer RSA,
+answers `CKR_MECHANISM_INVALID`, and an error for a NULL mechanism, which
+v3.0 made the way to end an operation.
 
 The key-attribute latch tests (`SetLatchingAttribute`, `TookanAttackA5a`,
 `TookanAttackA5b`) belong to the 3DES bucket: their fixture hard-codes
 `CKM_DES3_KEY_GEN`. The same latches are checked on AES keys by the gtest
 suite (`integration-tests/cpp/object/attr_tests.cpp`).
 
-Two behaviours cannot be checked on the mock device at all, and are hardware
-run items: a wrong PIN (the mock accepts any credential) and unmasking a
-persisted key in a second process (the mock's masking key is process-local).
+A wrong PIN can be checked on the mock: the first login in a process
+provisions the credential, and a later login with another PIN fails. It fails
+with `CKR_FUNCTION_FAILED`, because the SDK reports a rejected credential as a
+generic failure, so `UserLoginWrongPIN` (which wants `CKR_PIN_INCORRECT`)
+stays off the list until the SDK names that status.
+
+A generated key does not yet outlive the device session it was generated in:
+after `C_Logout`, the close of the slot's last session, `C_CloseAllSessions`
+or `C_Finalize` its masked blob no longer unmasks (`CKR_KEY_HANDLE_INVALID`),
+within one process as much as across processes. Across processes the mock
+adds a second cause: every process provisions its partition afresh, so a key
+from another process can only unmask once the provisioning material persists.
 The gate also runs against the in-memory object store only; the persistent
 backend (`TSRA_PKCS11_PERSIST=1`) has unit tests but no conformance run.
 

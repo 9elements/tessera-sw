@@ -7,7 +7,8 @@
 /// public session, so they are the cheapest place to pin the module-wide
 /// state machine): a bad session handle before anything else, an operation
 /// must exist before arguments are judged, every data-call failure terminates
-/// the operation, and a one-shot and a multi-part operation cannot be mixed.
+/// the operation, a one-shot and a multi-part operation cannot be mixed, and
+/// the v3.0 cancels (a NULL mechanism, C_SessionCancel) end an operation.
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -58,7 +59,44 @@ TEST_F(op_lifecycle, init_reports_the_session_handle_first)
 {
     EXPECT_CKR(CKR_SESSION_HANDLE_INVALID, p11()->C_DigestInit(kInvalidSession, &g_sha256));
     EXPECT_CKR(CKR_SESSION_HANDLE_INVALID, p11()->C_DigestInit(kInvalidSession, nullptr));
-    EXPECT_CKR(CKR_ARGUMENTS_BAD, p11()->C_DigestInit(s_, nullptr));
+}
+
+TEST_F(op_lifecycle, null_mechanism_cancels_the_active_digest)
+{
+    EXPECT_CKR_OK(p11()->C_DigestInit(s_, nullptr)) << "nothing active: nothing to cancel";
+
+    CK_BYTE buf[64];
+    CK_ULONG len = sizeof(buf);
+    ASSERT_CKR_OK(p11()->C_DigestInit(s_, &g_sha256));
+    ASSERT_CKR_OK(p11()->C_DigestUpdate(s_, abc(), 3));
+    EXPECT_CKR_OK(p11()->C_DigestInit(s_, nullptr));
+    EXPECT_CKR(CKR_OPERATION_NOT_INITIALIZED, p11()->C_DigestFinal(s_, buf, &len));
+
+    // A fresh operation starts clean: nothing of the cancelled one remains.
+    ASSERT_CKR_OK(p11()->C_DigestInit(s_, &g_sha256));
+    ASSERT_CKR_OK(p11()->C_Digest(s_, abc(), 3, buf, &len));
+    EXPECT_EQ(0, std::memcmp(buf, g_abc_sha256, 32));
+}
+
+TEST_F(op_lifecycle, session_cancel_ends_only_the_named_operations)
+{
+    ASSERT_NE(nullptr, p11_3());
+    CK_BYTE buf[64];
+    CK_ULONG len = 0;
+    ASSERT_CKR_OK(p11()->C_DigestInit(s_, &g_sha256));
+    EXPECT_CKR_OK(p11_3()->C_SessionCancel(s_, 0)) << "no flags: nothing changes";
+    EXPECT_CKR_OK(p11_3()->C_SessionCancel(s_, CKF_ENCRYPT | CKF_FIND_OBJECTS | CKF_SIGN))
+        << "flags of operations that are not active are ignored";
+    EXPECT_CKR_OK(p11()->C_Digest(s_, abc(), 3, nullptr, &len)) << "the digest is still active";
+    EXPECT_CKR_OK(p11_3()->C_SessionCancel(s_, CKF_DIGEST | CKF_DECRYPT));
+    len = sizeof(buf);
+    EXPECT_CKR(CKR_OPERATION_NOT_INITIALIZED, p11()->C_Digest(s_, abc(), 3, buf, &len));
+
+    ASSERT_CKR_OK(p11()->C_FindObjectsInit(s_, nullptr, 0));
+    EXPECT_CKR_OK(p11_3()->C_SessionCancel(s_, CKF_FIND_OBJECTS));
+    EXPECT_CKR(CKR_OPERATION_NOT_INITIALIZED, p11()->C_FindObjectsFinal(s_));
+
+    EXPECT_CKR(CKR_SESSION_HANDLE_INVALID, p11_3()->C_SessionCancel(kInvalidSession, CKF_DIGEST));
 }
 
 TEST_F(op_lifecycle, data_calls_need_an_operation_before_arguments_are_judged)

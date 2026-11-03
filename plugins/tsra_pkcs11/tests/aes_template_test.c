@@ -846,18 +846,21 @@ static void test_status_maps(void)
         { -30, CKR_FUNCTION_FAILED, "-30 PENDING_KEY_GENERATION" },
         { -31, CKR_OBJECT_HANDLE_INVALID, "-31 KEY_NOT_FOUND" },
         { -34, CKR_PIN_LOCKED, "-34 VAULT_APP_LIMIT_REACHED" },
+        { -35, CKR_DEVICE_ERROR, "-35 RETRY_EXHAUSTED" },
         { -36, CKR_DEVICE_ERROR, "-36 DEVICE_NOT_READY" },
         { -37, CKR_ACTION_PROHIBITED, "-37 CANNOT_DELETE_INTERNAL_KEYS" },
         { -38, CKR_DEVICE_ERROR, "-38 UNSUPPORTED_API_REVISION" },
         { -39, CKR_DEVICE_ERROR, "-39 DEVICE_NOT_ACCESSIBLE" },
         { -40, CKR_OPERATION_NOT_INITIALIZED, "-40 INVALID_CONTEXT_STATE" },
+        { -42, CKR_USER_NOT_LOGGED_IN, "-42 INVALID_SESSION" },
+        { -45, CKR_KEY_FUNCTION_NOT_PERMITTED, "-45 UNSUPPORTED_KEY_OPERATION" },
+        { -78, CKR_KEY_HANDLE_INVALID, "-78 MASKED_KEY_AUTHENTICATION_FAILED" },
         /* Real statuses that deliberately have no arm stay on the fallback. */
         { -18, CKR_FUNCTION_FAILED, "-18 CERT_CHAIN_CHANGED (no arm)" },
         { -21, CKR_FUNCTION_FAILED, "-21 IO_ABORTED (no arm)" },
         { -22, CKR_FUNCTION_FAILED, "-22 IO_ABORT_IN_PROGRESS (no arm)" },
         { -24, CKR_FUNCTION_FAILED, "-24 NONCE_MISMATCH (no arm)" },
         { -33, CKR_FUNCTION_FAILED, "-33 PARTITION_ALREADY_PROVISIONED stays the fallback" },
-        { -35, CKR_FUNCTION_FAILED, "-35 RETRY_EXHAUSTED (no arm)" },
         { -41, CKR_FUNCTION_FAILED, "-41 BK3_ALREADY_INITIALIZED (no arm)" },
         { -999, CKR_FUNCTION_FAILED, "unknown negative -> FUNCTION_FAILED" },
         { 7, CKR_FUNCTION_FAILED, "unknown positive -> FUNCTION_FAILED" },
@@ -1103,23 +1106,40 @@ static void test_cipher_mechs(void)
         "a misaligned stored list is decoded, not dereferenced"
     );
 
-    /* The XTS tweak: 16 bytes, anything but the 128-bit maximum. */
+    /* The XTS tweak: 16 bytes, read little-endian, below 2^64 - 1. */
     CK_BYTE tweak[AES_XTS_TWEAK_LEN];
+    const size_t low = sizeof(uint64_t);
     memset(tweak, 0, sizeof(tweak));
     CHECK(tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_OK, "a zero tweak -> CKR_OK");
+    memset(tweak, 0xFF, low);
+    tweak[0] = 0xFE;
+    CHECK(tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_OK, "2^64 - 2 -> CKR_OK");
+    tweak[0] = 0xFF;
+    CHECK(
+        tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_MECHANISM_PARAM_INVALID,
+        "2^64 - 1 (cannot be advanced) -> CKR_MECHANISM_PARAM_INVALID"
+    );
+    for (size_t i = low; i < AES_XTS_TWEAK_LEN; i++)
+    {
+        memset(tweak, 0, sizeof(tweak));
+        tweak[i] = 0x01;
+        char msg[80];
+        snprintf(
+            msg,
+            sizeof(msg),
+            "upper tweak byte %lu set -> CKR_MECHANISM_PARAM_INVALID",
+            (unsigned long)i
+        );
+        CHECK(
+            tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_MECHANISM_PARAM_INVALID,
+            msg
+        );
+    }
     memset(tweak, 0xFF, sizeof(tweak));
     CHECK(
         tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_MECHANISM_PARAM_INVALID,
-        "all-0xFF tweak (cannot be advanced) -> CKR_MECHANISM_PARAM_INVALID"
+        "all-0xFF tweak -> CKR_MECHANISM_PARAM_INVALID"
     );
-    for (size_t i = 0; i < AES_XTS_TWEAK_LEN; i++)
-    {
-        memset(tweak, 0xFF, sizeof(tweak));
-        tweak[i] = 0xFE;
-        char msg[80];
-        snprintf(msg, sizeof(msg), "tweak byte %lu = 0xFE -> CKR_OK", (unsigned long)i);
-        CHECK(tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak)) == CKR_OK, msg);
-    }
     CHECK(
         tsra_pkcs11_xts_tweak_check(tweak, sizeof(tweak) - 1) == CKR_MECHANISM_PARAM_INVALID,
         "a 15-byte tweak -> CKR_MECHANISM_PARAM_INVALID"
@@ -1330,6 +1350,18 @@ static void test_out_len(void)
         !tsra_pkcs11_gcm_fits(AES_GCM_AAD_ALIGN, (CK_ULONG)UINT32_MAX - AES_GCM_AAD_ALIGN + 1),
         "GCM: one byte over the 32-bit limit does not fit"
     );
+    if (sizeof(CK_ULONG) > sizeof(uint32_t))
+    {
+        /* Lengths whose padded sum wraps to 0 in 64 bits. */
+        CHECK(
+            !tsra_pkcs11_gcm_fits(AES_GCM_AAD_ALIGN, (CK_ULONG)0 - AES_GCM_AAD_ALIGN),
+            "GCM: a data length past 32 bits does not fit"
+        );
+        CHECK(
+            !tsra_pkcs11_gcm_fits((CK_ULONG)-1, 0),
+            "GCM: an AAD length past 32 bits does not fit"
+        );
+    }
     CHECK(
         tsra_pkcs11_cipher_out_len(CKM_AES_CBC, true, 16, &n) == CKR_MECHANISM_INVALID,
         "CBC lengths come from the device -> CKR_MECHANISM_INVALID here"

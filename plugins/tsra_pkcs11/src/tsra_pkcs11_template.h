@@ -206,10 +206,11 @@ bool tsra_pkcs11_key_mech_permitted(
 );
 
 /*
- * Validate a CKM_AES_XTS parameter, the raw 16-byte tweak. CKR_OK, or
- * CKR_MECHANISM_PARAM_INVALID for a NULL or wrongly sized parameter, or for
- * the one tweak the device cannot use: all bytes 0xFF, the 128-bit maximum,
- * which the SDK must be able to advance past the data unit it encrypts.
+ * Validate a CKM_AES_XTS parameter, the raw 16-byte tweak read as a
+ * little-endian integer. CKR_OK for a tweak below 2^64 - 1, else
+ * CKR_MECHANISM_PARAM_INVALID: a NULL or wrongly sized parameter, any of the
+ * upper 8 bytes set, or 2^64 - 1, which the SDK cannot advance past the data
+ * unit within 64 bits.
  */
 CK_RV tsra_pkcs11_xts_tweak_check(const void *param, CK_ULONG param_len);
 
@@ -247,7 +248,8 @@ CK_RV tsra_pkcs11_cipher_out_len(
 /*
  * Whether a GCM call over `data_len` bytes with `aad_len` bytes of AAD fits
  * the device: the AAD padded to AES_GCM_AAD_ALIGN plus the data must stay
- * within 32 bits, which the SDK does not check before narrowing.
+ * within 32 bits, which the SDK does not check before narrowing. false for
+ * either length above 32 bits.
  */
 bool tsra_pkcs11_gcm_fits(CK_ULONG aad_len, CK_ULONG data_len);
 

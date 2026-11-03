@@ -492,30 +492,6 @@ CK_RV C_DeriveKey(
     return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
-CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
-{
-    if (!g_tsra_pkcs11.initialized)
-    {
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    (void)hSession;
-    (void)pSeed;
-    (void)ulSeedLen;
-    return CKR_FUNCTION_NOT_SUPPORTED;
-}
-
-CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR RandomData, CK_ULONG ulRandomLen)
-{
-    if (!g_tsra_pkcs11.initialized)
-    {
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    (void)hSession;
-    (void)RandomData;
-    (void)ulRandomLen;
-    return CKR_FUNCTION_NOT_SUPPORTED;
-}
-
 CK_RV C_GetFunctionStatus(CK_SESSION_HANDLE hSession)
 {
     if (!g_tsra_pkcs11.initialized)
@@ -555,17 +531,6 @@ CK_RV C_LoginUser(
     (void)ulPinLen;
     (void)pUsername;
     (void)ulUsernameLen;
-    return CKR_FUNCTION_NOT_SUPPORTED;
-}
-
-CK_RV C_SessionCancel(CK_SESSION_HANDLE hSession, CK_FLAGS flags)
-{
-    if (!g_tsra_pkcs11.initialized)
-    {
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    (void)hSession;
-    (void)flags;
     return CKR_FUNCTION_NOT_SUPPORTED;
 }
 

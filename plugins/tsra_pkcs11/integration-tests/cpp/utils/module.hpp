@@ -100,6 +100,15 @@ class Pkcs11Module
         {
             throw std::runtime_error("C_GetFunctionList failed");
         }
+        // The v3 functions (C_SessionCancel, ...) are only in the interface's list.
+        auto get_iface = reinterpret_cast<CK_C_GetInterface>(dlsym(dl_, "C_GetInterface"));
+        CK_INTERFACE_PTR iface = nullptr;
+        if ((get_iface == nullptr) || (get_iface(nullptr, nullptr, &iface, 0) != CKR_OK) ||
+            (iface == nullptr))
+        {
+            throw std::runtime_error("C_GetInterface failed");
+        }
+        fns3_ = static_cast<CK_FUNCTION_LIST_3_0_PTR>(iface->pFunctionList);
         rv = fns_->C_Initialize(nullptr);
         if (rv != CKR_OK)
         {
@@ -113,6 +122,7 @@ class Pkcs11Module
         {
             (void)fns_->C_Finalize(nullptr);
             fns_ = nullptr;
+            fns3_ = nullptr;
         }
         if (dl_ != nullptr)
         {
@@ -126,9 +136,15 @@ class Pkcs11Module
         return fns_;
     }
 
+    CK_FUNCTION_LIST_3_0_PTR fns3() const
+    {
+        return fns3_;
+    }
+
   private:
     void *dl_ = nullptr;
     CK_FUNCTION_LIST_PTR fns_ = nullptr;
+    CK_FUNCTION_LIST_3_0_PTR fns3_ = nullptr;
 };
 
 /// The module's function list (valid once ModuleEnvironment has run).
@@ -182,6 +198,12 @@ inline CK_RV login_user(CK_SESSION_HANDLE s)
         reinterpret_cast<CK_UTF8CHAR_PTR>(pin.data()),
         static_cast<CK_ULONG>(pin.size())
     );
+}
+
+/// The module's v3.0 function list, from its default interface.
+inline CK_FUNCTION_LIST_3_0_PTR p11_3()
+{
+    return Pkcs11Module::instance().fns3();
 }
 
 class ModuleEnvironment : public ::testing::Environment

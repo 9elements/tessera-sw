@@ -22,7 +22,7 @@ extern "C"
 
 /* Persistent host object store: opt-in file backend rooted at a store directory.
  * The backend is enabled by TSRA_PKCS11_PERSIST and rooted at
- * TSRA_PKCS11_STORE_DIR (a safe path), defaulting to a dedicated directory. */
+ * TSRA_PKCS11_STORE_DIR, defaulting to a dedicated directory when unset. */
 #define TSRA_PKCS11_STORE_DIR_LEN 4096
 #define TSRA_PKCS11_ENV_STORE_DIR "TSRA_PKCS11_STORE_DIR"
 #define TSRA_PKCS11_ENV_PERSIST "TSRA_PKCS11_PERSIST"
@@ -46,11 +46,15 @@ typedef struct
 /*
  * Populate `cfg`. Credentials are taken from the environment only
  * (TSRA_PKCS11_ID / TSRA_PKCS11_PIN, each 32 hex chars = 16 bytes); mock
- * defaults are used for anything unset so the module is usable out of the box
- * against the simulator. TSRA_PKCS11_CONF is reserved for a future config file
- * carrying key-material paths and slot layout once persistence lands.
+ * defaults are used for anything unset or malformed so the module is usable out
+ * of the box against the simulator. The store directory is
+ * TSRA_PKCS11_STORE_DIR with an optional "file:" prefix, or
+ * TSRA_PKCS11_DEFAULT_STORE_DIR when the variable is unset. Returns
+ * CKR_ARGUMENTS_BAD when the variable is set but empty, contains "..", or does
+ * not fit store_dir: a bad setting fails closed instead of falling back to the
+ * default. The caller clears `cfg` on either outcome.
  */
-void tsra_pkcs11_config_load(tsra_pkcs11_config *cfg);
+CK_RV tsra_pkcs11_config_load(tsra_pkcs11_config *cfg);
 
 /*
  * Wipe `cfg` (credential id, OBK, and PIN bytes). Callers must clear a loaded

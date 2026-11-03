@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "tsra_pkcs11_config.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 static int hex_decode(const char *hex, CK_BYTE *out, size_t bytes)
 {
     CK_BYTE tmp[P11_HEX_DECODE_MAX];
+    int rc = -1;
     /* strnlen bounds the scan to the expected length, so a string missing its
      * terminator within bytes * 2 + 1 chars is rejected rather than run past. */
     if (hex == NULL || out == NULL || bytes > sizeof(tmp) ||
@@ -40,12 +42,16 @@ static int hex_decode(const char *hex, CK_BYTE *out, size_t bytes)
                                             : -1;
         if (hi < 0 || lo < 0)
         {
-            return -1;
+            goto cleanup;
         }
         tmp[i] = (CK_BYTE)((hi << 4) | lo);
     }
     memcpy(out, tmp, bytes);
-    return 0;
+    rc = 0;
+
+cleanup:
+    tsra_pkcs11_wipe(tmp, sizeof(tmp)); /* it staged credential bytes */
+    return rc;
 }
 
 /* Return `path` advanced past a leading "file:" scheme, mirroring the provider's
@@ -72,8 +78,12 @@ static bool path_is_safe(const char *path)
 /* Populate `cfg` from the environment: mock-friendly credential defaults, then
  * the env-var overrides, then the object-store settings (see the contract on
  * the declaration in tsra_pkcs11_config.h). */
-void tsra_pkcs11_config_load(tsra_pkcs11_config *cfg)
+CK_RV tsra_pkcs11_config_load(tsra_pkcs11_config *cfg)
 {
+    if (cfg == NULL)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
     memset(cfg, 0, sizeof(*cfg));
     /* Simulator defaults: any non-zero id/pin is accepted, OBK is any 48 bytes. */
     memset(cfg->id, 0x01, sizeof(cfg->id));
@@ -83,41 +93,25 @@ void tsra_pkcs11_config_load(tsra_pkcs11_config *cfg)
     (void)hex_decode(getenv(TSRA_PKCS11_ENV_ID), cfg->id, sizeof(cfg->id));
     (void)hex_decode(getenv(TSRA_PKCS11_ENV_PIN), cfg->default_pin, sizeof(cfg->default_pin));
 
-    /* Persistent object store: rooted at a dedicated default, overridable by a
-     * safe TSRA_PKCS11_STORE_DIR; the file backend is opt-in via
-     * TSRA_PKCS11_PERSIST (unset keeps the in-memory backend as before). */
-    const char *dir = strip_file_prefix(getenv(TSRA_PKCS11_ENV_STORE_DIR));
+    const char *env = getenv(TSRA_PKCS11_ENV_STORE_DIR);
+    const char *dir = (env != NULL) ? strip_file_prefix(env) : TSRA_PKCS11_DEFAULT_STORE_DIR;
     if (!path_is_safe(dir))
     {
-        dir = TSRA_PKCS11_DEFAULT_STORE_DIR;
+        return CKR_ARGUMENTS_BAD;
     }
     int written = snprintf(cfg->store_dir, sizeof(cfg->store_dir), "%s", dir);
-    if (written < 0 || (size_t)written >= sizeof(cfg->store_dir))
+    if ((written < 0) || ((size_t)written >= sizeof(cfg->store_dir)))
     {
-        /* An overlong override cannot be stored safely; fall back to the default
-         * (which always fits) rather than a truncated path. */
-        dir = TSRA_PKCS11_DEFAULT_STORE_DIR;
-        (void)snprintf(cfg->store_dir, sizeof(cfg->store_dir), "%s", dir);
+        return CKR_ARGUMENTS_BAD; /* a truncated path would name another directory */
     }
 
     const char *persist = getenv(TSRA_PKCS11_ENV_PERSIST);
     cfg->store_persist =
         (persist != NULL) && ((strcmp(persist, "1") == 0) || (strcasecmp(persist, "true") == 0));
+    return CKR_OK;
 }
 
-/* Wipe `cfg` — it carries credential and OBK bytes. The store goes through a
- * volatile pointer so the compiler cannot elide it as a dead store when the
- * config is a stack object about to leave scope; this module links no
- * libcrypto, so OPENSSL_cleanse is not available here. */
 void tsra_pkcs11_config_clear(tsra_pkcs11_config *cfg)
 {
-    if (cfg == NULL)
-    {
-        return;
-    }
-    volatile unsigned char *p = (volatile unsigned char *)cfg;
-    for (size_t i = 0; i < sizeof(*cfg); i++)
-    {
-        p[i] = 0;
-    }
+    tsra_pkcs11_wipe(cfg, sizeof(*cfg)); /* NULL-safe */
 }

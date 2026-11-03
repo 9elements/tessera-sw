@@ -18,6 +18,10 @@
 /* The one tag length the device produces, in the unit CK_GCM_PARAMS uses. */
 #define GCM_TAG_BITS (AES_GCM_TAG_LEN * 8)
 
+/* XTS tweaks are held to their low 64 bits: V2 device sessions refuse more and
+ * the mock ignores the rest, so one rule holds on every session kind. */
+#define XTS_TWEAK_LOW_LEN sizeof(uint64_t)
+
 /* The key families C_GenerateKey can produce; see tsra_pkcs11_keygen_policy. */
 static const tsra_pkcs11_keygen_policy POLICY_AES = {
     .keygen_mech = CKM_AES_KEY_GEN,
@@ -507,15 +511,22 @@ CK_RV tsra_pkcs11_xts_tweak_check(const void *param, CK_ULONG param_len)
     {
         return CKR_MECHANISM_PARAM_INVALID;
     }
+    /* Little-endian: the low 64 bits come first. */
     const CK_BYTE *b = (const CK_BYTE *)param;
+    bool low_all_ones = true;
     for (CK_ULONG i = 0; i < AES_XTS_TWEAK_LEN; i++)
     {
-        if (b[i] != 0xFF)
+        if ((i >= XTS_TWEAK_LOW_LEN) && (b[i] != 0))
         {
-            return CKR_OK;
+            return CKR_MECHANISM_PARAM_INVALID; /* at or above 2^64 */
+        }
+        if ((i < XTS_TWEAK_LOW_LEN) && (b[i] != 0xFF))
+        {
+            low_all_ones = false;
         }
     }
-    return CKR_MECHANISM_PARAM_INVALID;
+    /* 2^64 - 1 cannot be advanced past the data unit within 64 bits. */
+    return low_all_ones ? CKR_MECHANISM_PARAM_INVALID : CKR_OK;
 }
 
 CK_RV tsra_pkcs11_gcm_params_check(const void *param, CK_ULONG param_len, CK_GCM_PARAMS *out)
@@ -588,6 +599,12 @@ CK_RV tsra_pkcs11_cipher_out_len(
 
 bool tsra_pkcs11_gcm_fits(CK_ULONG aad_len, CK_ULONG data_len)
 {
+    /* Either length past 32 bits cannot fit, and with a 64-bit CK_ULONG the
+     * sum below would wrap. */
+    if (((uint64_t)aad_len > UINT32_MAX) || ((uint64_t)data_len > UINT32_MAX))
+    {
+        return false;
+    }
     /* 64-bit arithmetic: CK_ULONG is only 32 bits wide on LLP64 platforms. */
     uint64_t padded =
         (((uint64_t)aad_len + (AES_GCM_AAD_ALIGN - 1)) / AES_GCM_AAD_ALIGN) * AES_GCM_AAD_ALIGN;

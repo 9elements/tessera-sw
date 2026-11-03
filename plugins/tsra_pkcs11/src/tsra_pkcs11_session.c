@@ -42,6 +42,60 @@ CK_RV tsra_pkcs11_session_reset_op(tsra_pkcs11_session_t *s)
     return CKR_OK;
 }
 
+void tsra_pkcs11_session_cancel_op(tsra_pkcs11_session_t *s, tsra_pkcs11_op_type_t op)
+{
+    if ((s != NULL) && (s->op == op))
+    {
+        tsra_pkcs11_session_reset_op(s);
+    }
+}
+
+/* The C_SessionCancel flag naming operation `op`; 0 for none. */
+static CK_FLAGS op_cancel_flag(tsra_pkcs11_op_type_t op)
+{
+    switch (op)
+    {
+    case P11_OP_FIND:
+        return CKF_FIND_OBJECTS;
+    case P11_OP_ENCRYPT:
+        return CKF_ENCRYPT;
+    case P11_OP_DECRYPT:
+        return CKF_DECRYPT;
+    case P11_OP_DIGEST:
+        return CKF_DIGEST;
+    case P11_OP_SIGN:
+        return CKF_SIGN;
+    case P11_OP_VERIFY:
+        return CKF_VERIFY;
+    default:
+        return 0;
+    }
+}
+
+CK_RV C_SessionCancel(CK_SESSION_HANDLE hSession, CK_FLAGS flags)
+{
+    if (!g_tsra_pkcs11.initialized)
+    {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    tsra_pkcs11_lock();
+    tsra_pkcs11_session_t *s = tsra_pkcs11_session_lookup(hSession);
+    if (s == NULL)
+    {
+        tsra_pkcs11_unlock();
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    /* The spec ignores a flag whose operation is not active, so flags naming
+     * operations this module lacks need no check. Every operation here can be
+     * cancelled, so CKR_OPERATION_CANCEL_FAILED never arises. */
+    if ((flags & op_cancel_flag(s->op)) != 0)
+    {
+        tsra_pkcs11_session_reset_op(s);
+    }
+    tsra_pkcs11_unlock();
+    return CKR_OK;
+}
+
 /* ========================================================================= */
 /* Session objects (destroyed with their session — the C_CloseSession rule)   */
 /* ========================================================================= */
@@ -143,12 +197,6 @@ CK_RV C_OpenSession(
     }
 
     tsra_pkcs11_lock();
-    /* An RO session may not be opened while the SO is logged in. */
-    if ((flags & CKF_RW_SESSION) == 0 && g_tsra_pkcs11.slots[slotID].so_logged_in)
-    {
-        tsra_pkcs11_unlock();
-        return CKR_SESSION_READ_WRITE_SO_EXISTS;
-    }
     tsra_pkcs11_session_t *s = NULL;
     for (size_t i = 0; i < TSRA_PKCS11_MAX_SESSIONS; i++)
     {
@@ -213,7 +261,6 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
         tsra_pkcs11_hsm_logout(slot->hsm_session);
         slot->hsm_session = 0;
         slot->user_logged_in = false;
-        slot->so_logged_in = false;
     }
     tsra_pkcs11_unlock();
     return CKR_OK;
@@ -243,7 +290,6 @@ CK_RV C_CloseAllSessions(CK_SLOT_ID slotID)
     tsra_pkcs11_hsm_logout(slot->hsm_session);
     slot->hsm_session = 0;
     slot->user_logged_in = false;
-    slot->so_logged_in = false;
     tsra_pkcs11_unlock();
     return CKR_OK;
 }
@@ -269,11 +315,7 @@ CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo)
     bool rw = (s->flags & CKF_RW_SESSION) != 0;
 
     CK_STATE state;
-    if (slot->so_logged_in)
-    {
-        state = CKS_RW_SO_FUNCTIONS;
-    }
-    else if (slot->user_logged_in)
+    if (slot->user_logged_in)
     {
         state = rw ? CKS_RW_USER_FUNCTIONS : CKS_RO_USER_FUNCTIONS;
     }
@@ -384,7 +426,7 @@ CK_RV C_Logout(CK_SESSION_HANDLE hSession)
         return CKR_SESSION_HANDLE_INVALID;
     }
     tsra_pkcs11_slot_t *slot = &g_tsra_pkcs11.slots[s->slot];
-    if (!slot->user_logged_in && !slot->so_logged_in)
+    if (!slot->user_logged_in)
     {
         tsra_pkcs11_unlock();
         return CKR_USER_NOT_LOGGED_IN;
@@ -406,9 +448,41 @@ CK_RV C_Logout(CK_SESSION_HANDLE hSession)
     tsra_pkcs11_hsm_logout(slot->hsm_session);
     slot->hsm_session = 0;
     slot->user_logged_in = false;
-    slot->so_logged_in = false;
     tsra_pkcs11_unlock();
     return CKR_OK;
+}
+
+/* ========================================================================= */
+/* Random numbers                                                            */
+/* ========================================================================= */
+
+/* The device offers the host no random-number generator and the token does not
+ * set CKF_RNG, so both entry points answer CKR_RANDOM_NO_RNG for any valid
+ * session. */
+static CK_RV no_rng(CK_SESSION_HANDLE hSession)
+{
+    if (!g_tsra_pkcs11.initialized)
+    {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    tsra_pkcs11_lock();
+    bool known = (tsra_pkcs11_session_lookup(hSession) != NULL);
+    tsra_pkcs11_unlock();
+    return known ? CKR_RANDOM_NO_RNG : CKR_SESSION_HANDLE_INVALID;
+}
+
+CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
+{
+    (void)pSeed;
+    (void)ulSeedLen;
+    return no_rng(hSession);
+}
+
+CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR RandomData, CK_ULONG ulRandomLen)
+{
+    (void)RandomData;
+    (void)ulRandomLen;
+    return no_rng(hSession);
 }
 
 /* ========================================================================= */
@@ -731,12 +805,13 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
 /*
  * Precedence in the digest entry points, in line with the spec's operation
  * rules and what conformance tooling checks: a bad session handle is reported
- * before anything else. C_DigestInit then checks arguments, then operation
- * state. The data calls check operation state first — with no operation there
- * is nothing to terminate, so CKR_OPERATION_NOT_INITIALIZED is the answer —
- * then arguments and the one-shot/multi-part mode; from there on every failure
- * terminates the operation, and only a successful sizing probe and
- * CKR_BUFFER_TOO_SMALL keep it alive.
+ * before anything else. C_DigestInit then takes a NULL mechanism as the v3.0
+ * request to end the active digest, and otherwise checks operation state
+ * before the mechanism. The data calls check operation state first, since with
+ * no operation there is nothing to terminate and CKR_OPERATION_NOT_INITIALIZED
+ * is the answer, then arguments and the one-shot/multi-part mode; from there on
+ * every failure terminates the operation, and only a successful sizing probe
+ * and CKR_BUFFER_TOO_SMALL keep it alive.
  */
 
 CK_RV C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism)
@@ -754,8 +829,9 @@ CK_RV C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism)
     }
     if (pMechanism == NULL_PTR)
     {
+        tsra_pkcs11_session_cancel_op(s, P11_OP_DIGEST);
         tsra_pkcs11_unlock();
-        return CKR_ARGUMENTS_BAD;
+        return CKR_OK;
     }
     if (s->op != P11_OP_NONE)
     {

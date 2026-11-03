@@ -110,6 +110,7 @@ PKCS11Test.ClosedSessionErrors
 PKCS11Test.EnumerateMechanisms
 PKCS11Test.EnumerateSlots
 PKCS11Test.FailedTermination
+PKCS11Test.GenerateRandomNoSession
 PKCS11Test.GetFunctionList
 PKCS11Test.GetFunctionListFail
 PKCS11Test.GetInfo
@@ -132,6 +133,7 @@ PKCS11Test.OpenSessionInvalid
 PKCS11Test.OpenSessionInvalidSlot
 PKCS11Test.OpenSessionUnsupportedNonSerial
 PKCS11Test.ParallelSessions
+PKCS11Test.SeedRandomNoSession
 PKCS11Test.WaitForSlotEvent
 ReadOnlySessionTest.CloseSessionInvalid
 ReadOnlySessionTest.ConsistentObjects
@@ -139,7 +141,9 @@ ReadOnlySessionTest.DigestInitInvalid
 ReadOnlySessionTest.DigestTestVectors
 ReadOnlySessionTest.EnumerateObjects
 ReadOnlySessionTest.GenerateKeyInvalid
+ReadOnlySessionTest.GenerateRandom
 ReadOnlySessionTest.InvalidSessionInfo
+ReadOnlySessionTest.SeedRandom
 ReadOnlySessionTest.SessionInfo
 ReadOnlySessionTest.UserLoginInvalid
 ReadWriteSessionTest.CloseSessionInvalid

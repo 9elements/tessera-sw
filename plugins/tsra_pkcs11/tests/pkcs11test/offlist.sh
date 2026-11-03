@@ -42,11 +42,12 @@ RULES=(
     'unsupported ^ReadWriteSessionTest\.(GetSetOperationState(Invalid)?|TookanAttackA1)$'
     'unsupported ^(ROUserSessionTest\.(WrapUnwrap|WrapInvalid|UnwrapInvalid)|RWEitherSessionTest\.TookanAttackA2)$'
     'sdk-lag ^(Ciphers/SecretKeyTest\.EncryptDecryptParts/5|ReadOnlySessionTest\.UserLoginWrongPIN)$'
-    'module-bug ^(Ciphers/SecretKeyTest\.EncryptDecryptInitInvalid/5|ReadWriteSessionTest\.CreateObjectInvalid)$'
+    'spec-gap ^Ciphers/SecretKeyTest\.EncryptDecryptInitInvalid/5$'
+    'module-bug ^ReadWriteSessionTest\.CreateObjectInvalid$'
 )
 
 # What keeps each bucket off the list, in table order.
-BUCKETS=(des aes-ecb rsa-keygen hmac md5 so rng import unsupported later sdk-lag module-bug)
+BUCKETS=(des aes-ecb rsa-keygen hmac md5 so rng import unsupported later sdk-lag spec-gap module-bug)
 declare -A WHY=(
     [des]="DES or 3DES. The default secret-key fixture generates CKM_DES3_KEY_GEN keys and the SDK has no DES. The latch, FindObjectSubset and Tookan A3 to A5 cases would run on an AES key; an AES fixture patch is planned for them."
     [aes-ecb]="AES-ECB, out of scope for the module. The two IV cases pass without asserting anything: ECB takes no IV."
@@ -59,13 +60,15 @@ declare -A WHY=(
     [unsupported]="Entry points the module does not offer: C_CopyObject, C_DigestKey, C_GetOperationState, the dual-function calls and key wrapping."
     [later]="C_GenerateKeyPair, not implemented yet (it comes with EC key generation)."
     [sdk-lag]="SDK behaviour the module cannot change: the CBC stream holds back the last full block until the final call (SDK issue #51), and a wrong PIN is the generic -8 (SDK issue #53), so C_Login cannot answer CKR_PIN_INCORRECT."
-    [module-bug]="Module behaviour scheduled for a fix: a mechanism advertised without an implementation, and C_CreateObject accepting incomplete templates."
+    [spec-gap]="Expectations this token does not share: CKR_KEY_TYPE_INCONSISTENT for a mechanism it does not offer, and an error for a NULL mechanism, which PKCS#11 3.0 defines as ending the active operation."
+    [module-bug]="Module behaviour scheduled for a fix: C_CreateObject accepting incomplete templates."
 )
 
 # Pass without asserting anything, yet absent from pkcs11test's skip report.
 VACUOUS=(
     Ciphers/SecretKeyTest.EncryptInvalidIV/4
     Ciphers/SecretKeyTest.DecryptInvalidIV/4
+    ReadOnlySessionTest.GenerateRandomNone
 )
 
 fail()

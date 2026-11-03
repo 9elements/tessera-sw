@@ -261,11 +261,15 @@ cleanup:
     return ok;
 }
 
-/* Run the one-time provisioning ceremony on an already-open partition handle.
- * Returns the device's raw status: the caller decides which non-OK statuses
- * (e.g. a concurrent process winning the provisioning race) still allow the
- * login to proceed. */
-static tsra_status provision(tsra_handle dev, const struct tsra_credentials *creds)
+/* Run the one-time provisioning ceremony on an already-open partition handle,
+ * with the owner backup key from `cfg`. Returns the device's raw status: the
+ * caller decides which non-OK statuses (e.g. a concurrent process winning the
+ * provisioning race) still allow the login to proceed. */
+static tsra_status provision(
+    tsra_handle dev,
+    const struct tsra_credentials *creds,
+    tsra_pkcs11_config *cfg
+)
 {
     struct tsra_part_prop prop = { TSRA_PART_PROP_ID_PART_PUB_KEY, NULL, 0 };
     tsra_status st = tsra_part_get_prop(dev, &prop);
@@ -297,9 +301,7 @@ static tsra_status provision(tsra_handle dev, const struct tsra_credentials *cre
         return TSRA_INTERNAL_ERROR;
     }
 
-    tsra_pkcs11_config cfg;
-    tsra_pkcs11_config_load(&cfg);
-    struct tsra_buffer obk_buf = { cfg.obk, sizeof(cfg.obk) };
+    struct tsra_buffer obk_buf = { cfg->obk, sizeof(cfg->obk) };
     struct tsra_owner_backup_key_config obk_cfg = { TSRA_OWNER_BACKUP_KEY_SOURCE_CALLER,
                                                     &obk_buf,
                                                     NULL };
@@ -344,9 +346,15 @@ CK_RV tsra_pkcs11_hsm_login(
         sl->hsm_dev = dev;
     }
 
+    /* Both hold credential bytes (cfg also the owner backup key): every exit
+     * below passes the wipe at cleanup. */
     struct tsra_credentials creds;
     tsra_pkcs11_config cfg;
-    tsra_pkcs11_config_load(&cfg);
+    CK_RV rv = tsra_pkcs11_config_load(&cfg);
+    if (rv != CKR_OK)
+    {
+        goto cleanup;
+    }
     make_creds(&creds, &cfg, pin, pin_len);
 
     /* Login = OpenSession. Provisioning is a separate, one-shot-per-power-cycle
@@ -356,7 +364,7 @@ CK_RV tsra_pkcs11_hsm_login(
     tsra_status st = tsra_sess_open(sl->hsm_dev, &creds, NULL, &sess);
     if (st == TSRA_CREDENTIALS_NOT_ESTABLISHED || st == TSRA_PARTITION_NOT_PROVISIONED)
     {
-        st = provision(sl->hsm_dev, &creds);
+        st = provision(sl->hsm_dev, &creds, &cfg);
         /* ALREADY_PROVISIONED / VAULT_APP_LIMIT_REACHED mean a concurrent
          * process won the provisioning race between our sess_open probe and the
          * part_init; the SDK treats both as "credentials already established"
@@ -367,18 +375,24 @@ CK_RV tsra_pkcs11_hsm_login(
             st != TSRA_VAULT_APP_LIMIT_REACHED)
         {
             TSRA_PKCS11_LOG("provision failed: %d", (int)st);
-            return tsra_pkcs11_ckr_from_tsra((int)st);
+            rv = tsra_pkcs11_ckr_from_tsra((int)st);
+            goto cleanup;
         }
         st = tsra_sess_open(sl->hsm_dev, &creds, NULL, &sess);
     }
     if (st != TSRA_OK)
     {
         TSRA_PKCS11_LOG("sess_open failed: %d", (int)st);
-        return tsra_pkcs11_ckr_from_tsra((int)st);
+        rv = tsra_pkcs11_ckr_from_tsra((int)st);
+        goto cleanup;
     }
     *out_session = sess;
     TSRA_PKCS11_LOG("login ok (dev=%u sess=%u)", sl->hsm_dev, sess);
-    return CKR_OK;
+
+cleanup:
+    tsra_pkcs11_wipe(&creds, sizeof(creds));
+    tsra_pkcs11_config_clear(&cfg);
+    return rv;
 }
 
 void tsra_pkcs11_hsm_logout(uint32_t hsm_session)

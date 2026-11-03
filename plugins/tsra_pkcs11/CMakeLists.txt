@@ -61,6 +61,7 @@ set(TSRA_PKCS11_SOURCES
     ./src/tsra_pkcs11_module.c
     ./src/tsra_pkcs11_dispatch.c
     ./src/tsra_pkcs11_slot.c
+    ./src/tsra_pkcs11_mech.c
     ./src/tsra_pkcs11_session.c
     ./src/tsra_pkcs11_digest.c
     ./src/tsra_pkcs11_objstore_mem.c

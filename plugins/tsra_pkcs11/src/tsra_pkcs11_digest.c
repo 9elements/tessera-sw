@@ -10,6 +10,7 @@
  */
 
 #include "tsra_pkcs11_digest.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -551,13 +552,7 @@ void tsra_pkcs11_digest_op_free(tsra_pkcs11_digest_op_t *op)
     {
         return;
     }
-    /* The op buffers caller message bytes, which may be sensitive; clear via a
-     * volatile pointer so the wipe of about-to-be-freed memory is not elided
-     * (the module links no libcrypto, so OPENSSL_cleanse is unavailable). */
-    volatile unsigned char *p = (volatile unsigned char *)op;
-    for (size_t i = 0; i < sizeof(*op); i++)
-    {
-        p[i] = 0;
-    }
+    /* The op buffers caller message bytes, which may be sensitive. */
+    tsra_pkcs11_wipe(op, sizeof(*op));
     free(op);
 }

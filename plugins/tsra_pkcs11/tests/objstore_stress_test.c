@@ -134,8 +134,14 @@ int main(void)
     s.ops->teardown(s.ctx);
 
     int expected = N_WORKERS * PER_WORKER;
-    printf("workers_ok=%d  found=%lu  expected=%d\n", workers_ok, (unsigned long)total, expected);
     int ok = workers_ok && total == (CK_ULONG)expected;
-    printf(ok ? "STRESS OK\n" : "STRESS FAIL\n");
+    printf(
+        "STRESS %s (%d workers ok: %s, %lu of %d objects found)\n",
+        ok ? "OK" : "FAIL",
+        N_WORKERS,
+        workers_ok ? "yes" : "no",
+        (unsigned long)total,
+        expected
+    );
     return ok ? 0 : 1;
 }

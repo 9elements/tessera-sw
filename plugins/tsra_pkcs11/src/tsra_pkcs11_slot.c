@@ -2,70 +2,12 @@
 // Licensed under the MIT License.
 
 /*
- * Slot / token / mechanism enumeration over g_tsra_pkcs11.slots[] (populated by the HSM
- * binding). The mechanism table reflects the TSRA SDK's actual capabilities:
- * no CKM_RSA_PKCS_KEY_PAIR_GEN (the device has no general RSA keygen, only an
- * internal unwrapping-key pair), no AES-ECB/CTR, no non-NIST curves, no SHA-3.
+ * Slot / token / mechanism enumeration over g_tsra_pkcs11.slots[] (populated by
+ * the HSM binding) and the mechanism table (tsra_pkcs11_mech.c).
  */
 
 #include "tsra_pkcs11_internal.h"
-
-/* ------------------------------------------------------------------------- */
-/* Mechanism table (TSRA real capabilities)                                */
-/* ------------------------------------------------------------------------- */
-
-typedef struct
-{
-    CK_MECHANISM_TYPE type;
-    CK_ULONG min_key;
-    CK_ULONG max_key;
-    CK_FLAGS flags;
-} tsra_pkcs11_mech_t;
-
-/* AES key sizes expressed in bytes; RSA/EC in bits, per common convention. */
-static const tsra_pkcs11_mech_t g_mechs[] = {
-    /* AES */
-    { CKM_AES_KEY_GEN, 16, 32, CKF_GENERATE },
-    { CKM_AES_CBC, 16, 32, CKF_ENCRYPT | CKF_DECRYPT },
-    { CKM_AES_CBC_PAD, 16, 32, CKF_ENCRYPT | CKF_DECRYPT },
-    { CKM_AES_GCM, 32, 32, CKF_ENCRYPT | CKF_DECRYPT },
-    { CKM_AES_XTS, 64, 64, CKF_ENCRYPT | CKF_DECRYPT },
-    { CKM_AES_XTS_KEY_GEN, 64, 64, CKF_GENERATE },
-    /* RSA (no RSA_PKCS_KEY_PAIR_GEN — TSRA has no general RSA keygen) */
-    { CKM_RSA_PKCS, 2048, 4096, CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_VERIFY },
-    { CKM_RSA_PKCS_OAEP, 2048, 4096, CKF_ENCRYPT | CKF_DECRYPT },
-    { CKM_RSA_PKCS_PSS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA1_RSA_PKCS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA256_RSA_PKCS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA384_RSA_PKCS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA512_RSA_PKCS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA256_RSA_PKCS_PSS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA384_RSA_PKCS_PSS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA512_RSA_PKCS_PSS, 2048, 4096, CKF_SIGN | CKF_VERIFY },
-    { CKM_RSA_AES_KEY_WRAP, 2048, 4096, CKF_WRAP | CKF_UNWRAP },
-    /* ECC (NIST P-256/384/521 only) */
-    { CKM_EC_KEY_PAIR_GEN, 256, 521, CKF_GENERATE_KEY_PAIR | CKF_EC_F_P },
-    { CKM_ECDSA, 256, 521, CKF_SIGN | CKF_VERIFY | CKF_EC_F_P },
-    { CKM_ECDSA_SHA1, 256, 521, CKF_SIGN | CKF_VERIFY | CKF_EC_F_P },
-    { CKM_ECDSA_SHA256, 256, 521, CKF_SIGN | CKF_VERIFY | CKF_EC_F_P },
-    { CKM_ECDSA_SHA384, 256, 521, CKF_SIGN | CKF_VERIFY | CKF_EC_F_P },
-    { CKM_ECDSA_SHA512, 256, 521, CKF_SIGN | CKF_VERIFY | CKF_EC_F_P },
-    { CKM_ECDH1_DERIVE, 256, 521, CKF_DERIVE | CKF_EC_F_P },
-    /* Digests (host-side in TSRA) */
-    { CKM_SHA_1, 0, 0, CKF_DIGEST },
-    { CKM_SHA256, 0, 0, CKF_DIGEST },
-    { CKM_SHA384, 0, 0, CKF_DIGEST },
-    { CKM_SHA512, 0, 0, CKF_DIGEST },
-    /* HMAC (SHA-2 only; HMAC-SHA1 is not a supported key kind) */
-    { CKM_SHA256_HMAC, 32, 64, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA384_HMAC, 48, 128, CKF_SIGN | CKF_VERIFY },
-    { CKM_SHA512_HMAC, 64, 128, CKF_SIGN | CKF_VERIFY },
-    { CKM_GENERIC_SECRET_KEY_GEN, 1, 128, CKF_GENERATE },
-    /* KDF */
-    { CKM_HKDF_DERIVE, 0, 0, CKF_DERIVE },
-    { CKM_SP800_108_COUNTER_KDF, 0, 0, CKF_DERIVE },
-};
-#define TSRA_PKCS11_NUM_MECHS (sizeof(g_mechs) / sizeof(g_mechs[0]))
+#include "tsra_pkcs11_mech.h"
 
 /* ------------------------------------------------------------------------- */
 /* Slot / token functions                                                    */
@@ -168,16 +110,30 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     tsra_pkcs11_pad_str(pInfo->model, sizeof(pInfo->model), TSRA_PKCS11_TOKEN_MODEL);
     tsra_pkcs11_pad_str(pInfo->serialNumber, sizeof(pInfo->serialNumber), slot->serial);
 
-    pInfo->flags = CKF_RNG | CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED;
+    /* No CKF_RNG: the device offers the host no random-number generator. */
+    pInfo->flags = CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED;
     if (slot->token_initialized)
     {
         pInfo->flags |= CKF_TOKEN_INITIALIZED;
     }
 
-    pInfo->ulMaxSessionCount = CK_EFFECTIVELY_INFINITE;
-    pInfo->ulSessionCount = CK_UNAVAILABLE_INFORMATION;
-    pInfo->ulMaxRwSessionCount = CK_EFFECTIVELY_INFINITE;
-    pInfo->ulRwSessionCount = CK_UNAVAILABLE_INFORMATION;
+    /* The session table is module-wide, so its size bounds every token. */
+    pInfo->ulMaxSessionCount = TSRA_PKCS11_MAX_SESSIONS;
+    pInfo->ulMaxRwSessionCount = TSRA_PKCS11_MAX_SESSIONS;
+    tsra_pkcs11_lock();
+    for (size_t i = 0; i < TSRA_PKCS11_MAX_SESSIONS; i++)
+    {
+        const tsra_pkcs11_session_t *s = &g_tsra_pkcs11.sessions[i];
+        if (s->in_use && (s->slot == slotID))
+        {
+            pInfo->ulSessionCount++;
+            if ((s->flags & CKF_RW_SESSION) != 0)
+            {
+                pInfo->ulRwSessionCount++;
+            }
+        }
+    }
+    tsra_pkcs11_unlock();
     /* TSRA credentials PIN is a fixed 16-byte value. */
     pInfo->ulMaxPinLen = TSRA_PKCS11_MAX_PIN_LEN;
     pInfo->ulMinPinLen = TSRA_PKCS11_MIN_PIN_LEN;
@@ -211,7 +167,7 @@ CK_RV C_GetMechanismList(
     {
         return CKR_SLOT_ID_INVALID;
     }
-    CK_ULONG n = TSRA_PKCS11_NUM_MECHS;
+    CK_ULONG n = TSRA_PKCS11_MECH_COUNT;
     if (pMechanismList == NULL_PTR)
     {
         *pulCount = n;
@@ -224,7 +180,7 @@ CK_RV C_GetMechanismList(
     }
     for (CK_ULONG i = 0; i < n; i++)
     {
-        pMechanismList[i] = g_mechs[i].type;
+        pMechanismList[i] = tsra_pkcs11_mechs[i].type;
     }
     *pulCount = n;
     return CKR_OK;
@@ -244,17 +200,15 @@ CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM
     {
         return CKR_SLOT_ID_INVALID;
     }
-    for (CK_ULONG i = 0; i < TSRA_PKCS11_NUM_MECHS; i++)
+    const tsra_pkcs11_mech_t *m = tsra_pkcs11_mech_find(type);
+    if (m == NULL)
     {
-        if (g_mechs[i].type == type)
-        {
-            pInfo->ulMinKeySize = g_mechs[i].min_key;
-            pInfo->ulMaxKeySize = g_mechs[i].max_key;
-            pInfo->flags = g_mechs[i].flags;
-            return CKR_OK;
-        }
+        return CKR_MECHANISM_INVALID;
     }
-    return CKR_MECHANISM_INVALID;
+    pInfo->ulMinKeySize = m->min_key;
+    pInfo->ulMaxKeySize = m->max_key;
+    pInfo->flags = m->flags;
+    return CKR_OK;
 }
 
 CK_RV C_WaitForSlotEvent(CK_FLAGS flags, CK_SLOT_ID_PTR pSlot, CK_VOID_PTR pReserved)

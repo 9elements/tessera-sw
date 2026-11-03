@@ -11,6 +11,7 @@
 /// key.
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <vector>
@@ -191,17 +192,26 @@ TEST_F(aes_xts, init_validates_the_tweak)
     CK_MECHANISM long_tweak = { CKM_AES_XTS, longer, sizeof(longer) };
     EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &long_tweak, key_));
 
-    // The device must advance the tweak past the data unit, which the 128-bit
-    // maximum cannot do; it is refused up front rather than mid-operation.
-    CK_BYTE max[kXtsTweak];
-    std::memset(max, 0xFF, sizeof(max));
-    CK_MECHANISM max_tweak = { CKM_AES_XTS, max, sizeof(max) };
-    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &max_tweak, key_));
-    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_DecryptInit(s_, &max_tweak, key_));
-    max[0] = 0xFE; // one below the maximum (little-endian): the largest usable tweak
+    // Tweaks are 64-bit (little-endian) and must stay below 2^64 - 1, so the
+    // device can advance them past the data unit; anything else is refused
+    // up front rather than mid-operation.
+    CK_BYTE t[kXtsTweak];
+    CK_MECHANISM tweak_mech = { CKM_AES_XTS, t, sizeof(t) };
+    std::memset(t, 0xFF, sizeof(t));
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &tweak_mech, key_));
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_DecryptInit(s_, &tweak_mech, key_));
+    std::memset(t, 0, sizeof(t));
+    t[kXtsTweak - 1] = 0x01; // 2^120
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &tweak_mech, key_));
+    std::memset(t, 0xFF, sizeof(uint64_t)); // 2^64 - 1 with the upper bytes zero
+    t[kXtsTweak - 1] = 0x00;
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_EncryptInit(s_, &tweak_mech, key_));
+    EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, p11()->C_DecryptInit(s_, &tweak_mech, key_));
+
+    t[0] = 0xFE; // 2^64 - 2: the largest usable tweak
     std::vector<CK_BYTE> plain = pattern(16), ct, back;
-    ASSERT_CKR_OK(crypt_oneshot(s_, true, &max_tweak, key_, plain, ct));
-    ASSERT_CKR_OK(crypt_oneshot(s_, false, &max_tweak, key_, ct, back));
+    ASSERT_CKR_OK(crypt_oneshot(s_, true, &tweak_mech, key_, plain, ct));
+    ASSERT_CKR_OK(crypt_oneshot(s_, false, &tweak_mech, key_, ct, back));
     EXPECT_EQ(plain, back);
 }
 

@@ -61,8 +61,8 @@ CK_RV tsra_pkcs11_ckr_from_tsra_hint(int status, CK_RV invalid_handle)
         return CKR_KEY_HANDLE_INVALID;
     case -29: /* SESSION_NEEDS_RENEGOTIATION — a resiliency event (live
                * migration, firmware recovery) invalidated the device session;
-               * recovery is a fresh C_Login, so surface it as the login domain
-               * does until the resiliency callbacks land. */
+               * recovery is C_Logout then C_Login, so surface it as the login
+               * domain does until the resiliency callbacks land. */
         return CKR_USER_NOT_LOGGED_IN;
     case -30: /* PENDING_KEY_GENERATION — transient: the device is still
                * regenerating internal keys after a resiliency event. The spec
@@ -71,6 +71,8 @@ CK_RV tsra_pkcs11_ckr_from_tsra_hint(int status, CK_RV invalid_handle)
         return CKR_FUNCTION_FAILED;
     case -34: /* VAULT_APP_LIMIT_REACHED */
         return CKR_PIN_LOCKED;
+    case -35: /* RETRY_EXHAUSTED */
+        return CKR_DEVICE_ERROR;
     case -37: /* CANNOT_DELETE_INTERNAL_KEYS */
         return CKR_ACTION_PROHIBITED;
     case -36: /* DEVICE_NOT_READY */
@@ -80,6 +82,14 @@ CK_RV tsra_pkcs11_ckr_from_tsra_hint(int status, CK_RV invalid_handle)
     case -40: /* INVALID_CONTEXT_STATE — a streaming crypto context was driven
                * out of order. */
         return CKR_OPERATION_NOT_INITIALIZED;
+    case -42: /* INVALID_SESSION: the device session behind the login is gone,
+               * and recovery is C_Logout then C_Login, as for -29. */
+        return CKR_USER_NOT_LOGGED_IN;
+    case -45: /* UNSUPPORTED_KEY_OPERATION */
+        return CKR_KEY_FUNCTION_NOT_PERMITTED;
+    case -78: /* MASKED_KEY_AUTHENTICATION_FAILED: a tampered or foreign masked
+               * blob, as for -26. */
+        return CKR_KEY_HANDLE_INVALID;
     default:
         /*
          * Deliberately including the crypto-engine range -46..-77 (CRYPTO_*,

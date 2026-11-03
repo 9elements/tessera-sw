@@ -5,6 +5,7 @@
 
 #include "tsra_pkcs11_compat.h"
 #include "tsra_pkcs11_objstore.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -118,7 +119,6 @@ typedef struct
     uint16_t api_rev_minor;
 
     /* Login state lives on the token so it is shared across sessions. */
-    bool so_logged_in;
     bool user_logged_in;
 
     /* TSRA partition handle, opened lazily at first login and reused; closed
@@ -171,6 +171,10 @@ tsra_pkcs11_session_t *tsra_pkcs11_session_lookup(CK_SESSION_HANDLE h);
  * state (including the unmasked device key), or find cursor. */
 CK_RV tsra_pkcs11_session_reset_op(tsra_pkcs11_session_t *s);
 
+/* Abandon the session's active operation if it is of kind `op` (the v3.0
+ * C_*Init call with a NULL mechanism); any other operation stays. NULL-safe. */
+void tsra_pkcs11_session_cancel_op(tsra_pkcs11_session_t *s, tsra_pkcs11_op_type_t op);
+
 /* Record `h` as a session object created by `s`. CKR_HOST_MEMORY if the list
  * cannot grow (CKR_ARGUMENTS_BAD for a NULL session) — the caller then destroys
  * the object rather than leak it. */
@@ -191,14 +195,6 @@ void tsra_pkcs11_cipher_op_free(void *op_ctx);
 
 /* Fill a fixed-width, space-padded CK_UTF8CHAR string field. */
 void tsra_pkcs11_pad_str(CK_UTF8CHAR *dst, size_t dstlen, const char *src);
-
-/*
- * Zero `n` bytes at `p` through a volatile pointer so the store is not elided
- * as a dead write when the memory is freed or leaves scope right after — the
- * same reason tsra_pkcs11_config.c wipes credentials this way (this module
- * links no libcrypto, so OPENSSL_cleanse is unavailable). NULL-safe.
- */
-void tsra_pkcs11_wipe(void *p, size_t n);
 
 /* The two shared function-list tables (defined in tsra_pkcs11_dispatch.c). */
 extern CK_FUNCTION_LIST tsra_pkcs11_function_list;         /* v2.40 view */

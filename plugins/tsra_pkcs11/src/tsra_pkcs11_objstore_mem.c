@@ -15,6 +15,7 @@
  */
 
 #include "tsra_pkcs11_objstore.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -113,14 +114,14 @@ static void free_object(mem_object *o)
     {
         if (o->attrs[i].value != NULL)
         {
-            memset(o->attrs[i].value, 0, o->attrs[i].len);
+            tsra_pkcs11_wipe(o->attrs[i].value, o->attrs[i].len);
             free(o->attrs[i].value);
         }
     }
     free(o->attrs);
     if (o->key_body != NULL)
     {
-        memset(o->key_body, 0, o->key_body_len);
+        tsra_pkcs11_wipe(o->key_body, o->key_body_len);
         free(o->key_body);
     }
     memset(o, 0, sizeof(*o));
@@ -379,7 +380,7 @@ static CK_RV mem_set_attr(
         }
         if (a->value != NULL)
         {
-            memset(a->value, 0, a->len);
+            tsra_pkcs11_wipe(a->value, a->len);
             free(a->value);
         }
         a->value = staged[i];
@@ -393,7 +394,7 @@ cleanup:
     {
         if (staged[i] != NULL)
         {
-            memset(staged[i], 0, tmpl[i].ulValueLen);
+            tsra_pkcs11_wipe(staged[i], tmpl[i].ulValueLen);
             free(staged[i]);
         }
     }
@@ -531,7 +532,7 @@ static CK_RV mem_set_key_body(
     }
     if (o->key_body != NULL)
     {
-        memset(o->key_body, 0, o->key_body_len);
+        tsra_pkcs11_wipe(o->key_body, o->key_body_len);
         free(o->key_body);
     }
     o->key_body = copy;

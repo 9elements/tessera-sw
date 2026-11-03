@@ -11,15 +11,19 @@
  *
  * Covers: directory create + owner-only verification, path-traversal rejection,
  * atomic write (0600, no leftover temp), read + two-call absence semantics,
- * idempotent unlink, oversize rejection, and cross-process exclusion via the
- * advisory lock (K children each doing M locked read-modify-writes must total
- * exactly K*M — a non-exclusive lock would lose updates).
+ * idempotent unlink, oversize rejection, an empty file read as corrupt, a stale
+ * temp file never reused, create refusing to replace, FIFOs refused without
+ * blocking, and cross-process exclusion via the advisory lock (K children each
+ * doing M locked read-modify-writes must total exactly K*M, which a
+ * non-exclusive lock would miss by losing updates). The directory fsync failures that writes and
+ * unlinks report need a failing filesystem and are not provoked here.
  */
 
 #define _DEFAULT_SOURCE
 
 #include "tsra_pkcs11_store_io.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +59,14 @@ static mode_t file_mode(const char *dir, const char *name)
         return 0;
     }
     return st.st_mode & 07777;
+}
+
+static nlink_t file_links(const char *dir, const char *name)
+{
+    char path[8192];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    struct stat st;
+    return (stat(path, &st) == 0) ? st.st_nlink : 0;
 }
 
 static int file_exists(const char *dir, const char *name)
@@ -193,6 +205,85 @@ int main(void)
         "oversize write rejected"
     );
     free(bigbuf);
+    CHECK(
+        tsra_pkcs11_store_write(store, "zero", payload, 0) == CKR_ARGUMENTS_BAD,
+        "zero-length write rejected (the store never writes an empty file)"
+    );
+
+    /* An empty file is corrupt, not absent. */
+    char path[8192];
+    snprintf(path, sizeof(path), "%s/empty", store);
+    int efd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (efd >= 0)
+    {
+        close(efd);
+    }
+    rd = (unsigned char *)1;
+    CHECK(
+        efd >= 0 && tsra_pkcs11_store_read(store, "empty", &rd, &rdlen) == CKR_FUNCTION_FAILED &&
+            rd == NULL,
+        "read of an empty file -> CKR_FUNCTION_FAILED"
+    );
+
+    /* A stale temp file (here a second link to another file, mode 0644) is
+     * replaced, never written through. */
+    CHECK(
+        tsra_pkcs11_store_write(store, "victim", payload, sizeof(payload)) == CKR_OK,
+        "write victim"
+    );
+    char victim[8192];
+    snprintf(victim, sizeof(victim), "%s/victim", store);
+    snprintf(path, sizeof(path), "%s/.obj2.tmp", store);
+    CHECK(link(victim, path) == 0 && chmod(path, 0644) == 0, "plant .obj2.tmp as a link to victim");
+    CHECK(
+        tsra_pkcs11_store_write(store, "obj2", payload, 10) == CKR_OK,
+        "write obj2 over the plant"
+    );
+    CHECK(
+        tsra_pkcs11_store_read(store, "victim", &rd, &rdlen) == CKR_OK && rd != NULL &&
+            rdlen == sizeof(payload),
+        "victim is untouched"
+    );
+    free(rd);
+    CHECK(
+        file_mode(store, "obj2") == 0600 && file_links(store, "obj2") == 1 &&
+            file_links(store, "victim") == 1 && !file_exists(store, ".obj2.tmp"),
+        "obj2 is a fresh 0600 inode, sharing nothing with victim"
+    );
+
+    /* create publishes a new name only. */
+    CHECK(tsra_pkcs11_store_create(store, "c1", payload, 10) == CKR_OK, "create c1");
+    CHECK(
+        tsra_pkcs11_store_create(store, "c1", payload, sizeof(payload)) == CKR_FUNCTION_FAILED,
+        "create over an existing c1 -> CKR_FUNCTION_FAILED"
+    );
+    CHECK(
+        tsra_pkcs11_store_read(store, "c1", &rd, &rdlen) == CKR_OK && rdlen == 10 &&
+            file_mode(store, "c1") == 0600 && file_links(store, "c1") == 1 &&
+            !file_exists(store, ".c1.tmp"),
+        "c1 kept its first content, one link, no leftover temp"
+    );
+    free(rd);
+
+    /* FIFOs are refused, not waited on: a blocking open would hang the test
+     * until the alarm fires. */
+    alarm(10);
+    snprintf(path, sizeof(path), "%s/fifo", store);
+    CHECK(
+        mkfifo(path, 0600) == 0 &&
+            tsra_pkcs11_store_read(store, "fifo", &rd, &rdlen) == CKR_FUNCTION_FAILED,
+        "read of a FIFO -> CKR_FUNCTION_FAILED"
+    );
+    char sub[4200];
+    snprintf(sub, sizeof(sub), "%s/sub", store);
+    snprintf(path, sizeof(path), "%s/.lock", sub);
+    int lfd = -1;
+    CHECK(
+        tsra_pkcs11_store_dir_ensure(sub) == CKR_OK && mkfifo(path, 0600) == 0 &&
+            tsra_pkcs11_store_lock(sub, &lfd) == CKR_FUNCTION_FAILED && lfd == -1,
+        "a FIFO as .lock -> CKR_FUNCTION_FAILED"
+    );
+    alarm(0);
 
     /* cross-process exclusion: K children * M locked increments == K*M. */
     const int K = 4, M = 50;

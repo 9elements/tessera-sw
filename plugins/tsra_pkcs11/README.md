@@ -4,7 +4,7 @@ A standalone **PKCS#11 (Cryptoki) v3.1** module for the TSRA. It links the
 native C API (`tsra.h`, generated from `api/native`) the same way
 `plugins/ossl_prov` does.
 
-## Status — framework + login + first key-backed slice
+## Status: digests, AES keys and ciphers, host objects
 
 Unimplemented PKCS#11 entry points return `CKR_FUNCTION_NOT_SUPPORTED` (after
 `C_Initialize`; before it every entry point other than `C_Initialize` and the
@@ -14,13 +14,19 @@ the spec requires). Implemented so far:
 - **Library / slots / sessions** — `C_Initialize`, `C_GetInfo`, slot/token/
   mechanism enumeration (real TSRA partitions become slots), sessions and the
   login state machine, and the `C_GetInterface` "PKCS 11" interface.
-- **`C_Login`** — runs the TSRA provisioning ceremony and opens a session.
-  Provisioning is done lazily: login opens a session and provisions the
-  partition only if the device reports it is not yet provisioned (provisioning
-  is one-shot per power cycle; a session is the repeatable per-login primitive).
+  `C_GetMechanismList` reports only the ten mechanisms below, and
+  `C_GetTokenInfo` the real session counts (at most 256 sessions).
+- **`C_Login`**: runs the TSRA provisioning ceremony and opens one device
+  session for the token. Provisioning is done lazily: login opens a device
+  session and provisions the partition only if the device reports it is not
+  yet provisioned (provisioning is one-shot per power cycle; a session is the
+  repeatable per-login primitive). Login state is per token, so every PKCS#11
+  session of the slot shares that one device session. It closes at
+  `C_Logout`, when the slot's last session closes, and at `C_Finalize`.
 - **Host objects** — `C_CreateObject` / `C_DestroyObject` / `C_GetAttributeValue`
-  / `C_SetAttributeValue` / `C_GetObjectSize` / `C_FindObjects*` against an
-  in-memory object store (see the seam below). `C_SetAttributeValue` changes
+  / `C_SetAttributeValue` / `C_GetObjectSize` / `C_FindObjects*` against the
+  host object store: in memory, or token objects in files with
+  `TSRA_PKCS11_PERSIST` (see Configuration). `C_SetAttributeValue` changes
   only the attributes PKCS#11 marks modifiable for the object's class (label,
   ID, dates, usage flags), and applies a template all-or-nothing; on keys
   `CKA_SENSITIVE` can only become TRUE and `CKA_EXTRACTABLE` only FALSE.
@@ -61,10 +67,10 @@ the spec requires). Implemented so far:
     the ciphertext. A failed tag check currently reports
     `CKR_FUNCTION_FAILED`: the SDK delivers it as a generic device-command
     failure that the module cannot tell apart from a device fault.
-  - XTS takes the 16-byte tweak (little-endian sector number) and encrypts the
-    whole message as one data unit, which the device caps at 8 KiB: a message
-    must be a non-zero multiple of 16 bytes up to 8192. The all-0xFF tweak is
-    refused, since the device must be able to advance the tweak past the unit.
+  - XTS takes the 16-byte tweak (little-endian sector number, below 2^64 - 1:
+    see Deviations) and encrypts the whole message as one data unit, which
+    the device caps at 8 KiB: a message must be a non-zero multiple of 16
+    bytes up to 8192.
 
 - **Multi-part `C_EncryptUpdate` / `C_EncryptFinal` and `C_DecryptUpdate` /
   `C_DecryptFinal` (the same four mechanisms)**: the one-shot lifetime rules
@@ -86,15 +92,41 @@ the spec requires). Implemented so far:
 
   The other key-backed mechanisms (RSA/ECDSA, wrap/unwrap, derive) are not
   implemented yet.
+- **Ending an operation**: `C_DigestInit`, `C_EncryptInit` and
+  `C_DecryptInit` with a NULL mechanism end the session's active operation of
+  their kind (and return `CKR_OK` when there is none), and `C_SessionCancel`
+  ends the operations its flags name.
+
+## Deviations from PKCS#11
+
+- **No random-number generator.** The device offers the host none, so the
+  token does not set `CKF_RNG`, and `C_GenerateRandom` and `C_SeedRandom`
+  return `CKR_RANDOM_NO_RNG`.
+- **An AES-GCM key is a key kind of its own.** The device keeps CBC, GCM and
+  XTS keys apart, so a key serves only its own family (table above). A GCM key
+  is requested with `CKA_ALLOWED_MECHANISMS = { CKM_AES_GCM }` at generation;
+  with OpenSC: `pkcs11-tool --keygen --key-type aes:32 --sensitive
+  --allowed-mechanisms AES-GCM`. A key generated without that list is a CBC
+  key, and `CKM_AES_GCM` on it returns `CKR_KEY_FUNCTION_NOT_PERMITTED`. In
+  PKCS#11 an AES key without the attribute serves every AES mechanism.
+- **GCM IV uniqueness is the caller's duty.** The caller supplies the 12-byte
+  IV in `CK_GCM_PARAMS`, and neither the module nor the device checks that an
+  IV is never reused with the same key. The message-based API, in which a
+  token can generate the IVs, is not implemented.
+- **XTS tweaks are 64-bit.** The tweak, read as a little-endian 128-bit
+  integer, must be below 2^64 - 1: its upper 8 bytes zero and its lower 8 not
+  all 0xFF, so the device can advance it past the data unit. Any other tweak
+  returns `CKR_MECHANISM_PARAM_INVALID`, where PKCS#11 allows any 16 bytes.
 
 ## Layering
 
 | Layer | Files | Responsibility |
 |---|---|---|
 | C ABI | `tsra_pkcs11_dispatch.c` | `CK_FUNCTION_LIST` + `_3_0` + the "PKCS 11" interface |
-| Framework | `tsra_pkcs11_module.c`, `tsra_pkcs11_slot.c`, `tsra_pkcs11_session.c` | init, slots, sessions, login, operation state machine |
+| Framework | `tsra_pkcs11_module.c`, `tsra_pkcs11_slot.c`, `tsra_pkcs11_session.c`, `tsra_pkcs11_mech.c` | init, slots, sessions, login, operation state machine; the mechanism table is a device-free unit of its own |
 | Host crypto | `tsra_pkcs11_digest.c` | self-contained SHA-1/256/384/512 (PKCS#11 digests must work in public sessions; the SDK digest needs a login) |
-| Object store | `tsra_pkcs11_objstore.h`, `tsra_pkcs11_objstore_mem.c` | host-side objects behind a vtable seam (in-memory now; a persistent backend implements the same ops later) |
+| Object store | `tsra_pkcs11_objstore.h`, `tsra_pkcs11_objstore_mem.c` | host-side objects behind a vtable seam; the in-memory backend |
+| File store | `tsra_pkcs11_objstore_file.c`, `tsra_pkcs11_store_record.c`, `tsra_pkcs11_store_io.c` | the persistent backend for token objects (session objects stay in memory): one record file per object, the record codec, and the crash-safe, owner-only filesystem primitives with a cross-process lock |
 | Object policy | `tsra_pkcs11_attr_policy.c` | which attributes `C_SetAttributeValue` may change, per class; a device-free unit of its own |
 | Key operations | `tsra_pkcs11_crypt.c`, `tsra_pkcs11_template.c` | key-backed entry points: operation state and the masked-blob store/unmask flow (CK_RV only); the keygen template validation, key-family choice and cipher mechanism policy are a device-free unit of their own |
 | HSM binding | `tsra_pkcs11_hsm.c`, `tsra_pkcs11_key.c`, `tsra_pkcs11_status.c`, `tsra_pkcs11_config.c` | the only code that calls `tsra_*` and maps `tsra_status` → `CK_RV` |
@@ -102,8 +134,8 @@ the spec requires). Implemented so far:
 
 The object store is the emulation layer PKCS#11 requires and the device does not
 provide (no persistent, attribute-templated, searchable key store). It is fronted
-by the `tsra_pkcs11_objstore` vtable so the in-memory backend can be replaced by a
-persistent one without changing any caller.
+by the `tsra_pkcs11_objstore` vtable, so the in-memory and the file backend
+serve the same callers.
 
 ## Build
 
@@ -127,9 +159,18 @@ copyright check skips that directory.
 
 Credentials are read from the environment (`TSRA_PKCS11_ID` /
 `TSRA_PKCS11_PIN`, each 32 hex characters); simulator defaults are used when
-unset. `TSRA_PKCS11_CONF` is reserved for a configuration file (key-material
-paths, slot layout) once persistent objects land. Set `TSRA_PKCS11_DEBUG=1`
-for stderr tracing.
+unset. Set `TSRA_PKCS11_DEBUG=1` for stderr tracing.
+
+Token objects live in memory and end with the process unless
+`TSRA_PKCS11_PERSIST=1` (or `true`) selects the file store. It keeps them
+under `TSRA_PKCS11_STORE_DIR` (default `/var/lib/tsra/pkcs11`; a `file:`
+prefix is accepted), one subdirectory per slot. The module creates a missing
+directory with mode 0700 (its parent must exist) and refuses an existing one
+that is not a directory the calling user owns with mode 0700, so
+`C_Initialize` fails. A `TSRA_PKCS11_STORE_DIR` that is empty, contains `..`
+or is longer than 4095 bytes makes `C_Initialize` return `CKR_ARGUMENTS_BAD`,
+with or without `TSRA_PKCS11_PERSIST`, instead of falling back to the
+default.
 
 ## Testing
 
@@ -141,14 +182,17 @@ complete CK_RV matrix of the keygen template validation and defaults, the
 key-family choice and cipher mechanism policy, CK_GCM_PARAMS decoding, the
 GCM/XTS output-length plan and the status maps; built with UBSan, so the
 misaligned templates and parameter blocks it feeds the decoders are real
-checks), and `tests/attr_policy_test.c` (every `C_SetAttributeValue` verdict,
-per object class). `integration-tests/cpp/` is the functional suite (GoogleTest,
-same shape as the OpenSSL provider's): it `dlopen`s the built module and
-drives the real Cryptoki ABI — keygen including the GCM/XTS key families,
-one-shot CBC, GCM and XTS round trips, the two-call sizing discipline, the
-operation state machine and init precedence, attribute changes and object
-sizes — so it
-needs the mock- or hardware-backed build (see the CMakeLists.txt header for
+checks), `tests/attr_policy_test.c` (every `C_SetAttributeValue` verdict,
+per object class), `tests/mech_table_test.c` (the mechanism table against
+the dispatch arms, in both directions) and `tests/config_test.c` (the
+environment configuration). `integration-tests/cpp/` is the functional suite
+(GoogleTest, same shape as the OpenSSL provider's): it `dlopen`s the built
+module and drives the real Cryptoki ABI: keygen including the GCM/XTS key
+families, one-shot CBC, GCM and XTS round trips, the two-call sizing
+discipline, the operation state machine and init precedence, an init path
+for every advertised mechanism, attribute changes and object sizes, and the
+store configuration at `C_Initialize`. So it needs the mock- or
+hardware-backed build (see the CMakeLists.txt header for
 the build/run recipe; `TSRA_PKCS11_MODULE` points it at a module,
 `TSRA_PKCS11_TEST_PIN` overrides the simulator PIN). `tests/pkcs11test/` is
 the conformance gate: it builds Google's PKCS#11 conformance program at a

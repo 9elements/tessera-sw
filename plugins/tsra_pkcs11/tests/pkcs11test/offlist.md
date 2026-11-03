@@ -5,8 +5,8 @@ Written by `offlist.sh` from an unfiltered pkcs11test run
 mock-backed module. Do not edit it by hand: change the bucket rules in
 `offlist.sh` and run it again.
 
-330 tests: 140 on the include-list, 190 off it (165 fail,
-25 pass without asserting anything).
+330 tests: 144 on the include-list, 186 off it (160 fail,
+26 pass without asserting anything).
 
 | Bucket | Names | Why they are off the list |
 |---|---|---|
@@ -16,12 +16,13 @@ mock-backed module. Do not edit it by hand: change the bucket rules in
 | hmac | 11 | HMAC keys from CKM_GENERIC_SECRET_KEY_GEN, which the SDK cannot generate. The module's HMAC keys come from ECDH plus HKDF, so these fixtures cannot pass. |
 | md5 | 12 | MD5, which the module does not offer. pkcs11test skips these cases. |
 | so | 10 | The Security Officer. The device session has one user credential, so CKU_SO is refused and the token is presented initialised. pkcs11test skips the SO logins under -X and token initialisation without -I. |
-| rng | 7 | Random numbers. The module has no generator. |
+| rng | 3 | Random numbers. The module has no generator. |
 | import | 3 | Plaintext key material through C_CreateObject, which is not a way to make keys on this token. |
 | unsupported | 19 | Entry points the module does not offer: C_CopyObject, C_DigestKey, C_GetOperationState, the dual-function calls and key wrapping. |
 | later | 1 | C_GenerateKeyPair, not implemented yet (it comes with EC key generation). |
 | sdk-lag | 2 | SDK behaviour the module cannot change: the CBC stream holds back the last full block until the final call (SDK issue #51), and a wrong PIN is the generic -8 (SDK issue #53), so C_Login cannot answer CKR_PIN_INCORRECT. |
-| module-bug | 2 | Module behaviour scheduled for a fix: a mechanism advertised without an implementation, and C_CreateObject accepting incomplete templates. |
+| spec-gap | 1 | Expectations this token does not share: CKR_KEY_TYPE_INCONSISTENT for a mechanism it does not offer, and an error for a NULL mechanism, which PKCS#11 3.0 defines as ending the active operation. |
+| module-bug | 1 | Module behaviour scheduled for a fix: C_CreateObject accepting incomplete templates. |
 
 ## des
 
@@ -199,12 +200,8 @@ mock-backed module. Do not edit it by hand: change the bucket rules in
 
 ## rng
 
-- `PKCS11Test.GenerateRandomNoSession`: fails
-- `PKCS11Test.SeedRandomNoSession`: fails
-- `ReadOnlySessionTest.GenerateRandom`: fails
 - `ReadOnlySessionTest.GenerateRandomBadArguments`: fails
-- `ReadOnlySessionTest.GenerateRandomNone`: fails
-- `ReadOnlySessionTest.SeedRandom`: fails
+- `ReadOnlySessionTest.GenerateRandomNone`: passes, asserts nothing
 - `ReadOnlySessionTest.SeedRandomBadArguments`: fails
 
 ## import
@@ -244,7 +241,10 @@ mock-backed module. Do not edit it by hand: change the bucket rules in
 - `Ciphers/SecretKeyTest.EncryptDecryptParts/5`: fails
 - `ReadOnlySessionTest.UserLoginWrongPIN`: fails
 
-## module-bug
+## spec-gap
 
 - `Ciphers/SecretKeyTest.EncryptDecryptInitInvalid/5`: fails
+
+## module-bug
+
 - `ReadWriteSessionTest.CreateObjectInvalid`: fails

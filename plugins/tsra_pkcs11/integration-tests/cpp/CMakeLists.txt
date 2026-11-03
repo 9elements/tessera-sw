@@ -42,6 +42,7 @@ get_filename_component(TSRA_REPO_ROOT "${TSRA_PKCS11_ROOT}/../.." ABSOLUTE)
 set(SOURCE
     main.cpp
     smoke_tests.cpp
+    config_tests.cpp
     aes/keygen_tests.cpp
     aes/cbc_tests.cpp
     aes/gcm_tests.cpp

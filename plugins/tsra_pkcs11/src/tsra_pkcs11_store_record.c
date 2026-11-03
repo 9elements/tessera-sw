@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "tsra_pkcs11_store_record.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -86,10 +87,8 @@ static void free_attrs(tsra_pkcs11_rec_attr *attrs, CK_ULONG n)
     {
         if (attrs[i].value != NULL)
         {
-            /* Attribute values may hold sensitive material; wipe before free
-             * (plain memset, matching tsra_pkcs11_objstore_mem.c — this module links no
-             * libcrypto so OPENSSL_cleanse is unavailable). */
-            memset(attrs[i].value, 0, attrs[i].len);
+            /* Attribute values may hold sensitive material; wipe before free. */
+            tsra_pkcs11_wipe(attrs[i].value, attrs[i].len);
             free(attrs[i].value);
         }
     }
@@ -286,7 +285,7 @@ void tsra_pkcs11_record_free(tsra_pkcs11_rec_object *obj)
     free_attrs(obj->attrs, obj->attr_count);
     if (obj->body != NULL)
     {
-        memset(obj->body, 0, obj->body_len);
+        tsra_pkcs11_wipe(obj->body, obj->body_len);
         free(obj->body);
     }
     memset(obj, 0, sizeof(*obj));

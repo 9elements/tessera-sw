@@ -11,9 +11,11 @@
 #define _DEFAULT_SOURCE
 
 #include "tsra_pkcs11_store_io.h"
+#include "tsra_pkcs11_wipe.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +41,22 @@ static CK_RV ckr_from_errno(int e)
     default:
         return CKR_FUNCTION_FAILED;
     }
+}
+
+/* fsync `dir`, so a rename, link or unlink in it survives a crash. The
+ * object store's counter-first rule relies on that, so a failure is reported
+ * rather than ignored. */
+static CK_RV sync_dir(const char *dir)
+{
+    int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd < 0)
+    {
+        return ckr_from_errno(errno);
+    }
+    int rc = fsync(dfd);
+    int e = errno;
+    close(dfd);
+    return (rc == 0) ? CKR_OK : ckr_from_errno(e);
 }
 
 CK_RV tsra_pkcs11_store_path_join(char *out, size_t outlen, const char *dir, const char *name)
@@ -94,14 +112,16 @@ CK_RV tsra_pkcs11_store_dir_ensure(const char *dir)
     return CKR_OK;
 }
 
-CK_RV tsra_pkcs11_store_write(
+/* The body of tsra_pkcs11_store_write (`replace`) and tsra_pkcs11_store_create. */
+static CK_RV write_file(
     const char *dir,
     const char *name,
     const unsigned char *data,
-    size_t len
+    size_t len,
+    bool replace
 )
 {
-    if (dir == NULL || name == NULL || (len > 0 && data == NULL))
+    if ((dir == NULL) || (name == NULL) || (data == NULL) || (len == 0))
     {
         return CKR_ARGUMENTS_BAD;
     }
@@ -125,7 +145,10 @@ CK_RV tsra_pkcs11_store_write(
         return CKR_FUNCTION_FAILED;
     }
 
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
+    /* A temp file left by a crash may carry another mode or further hard
+     * links; remove it, so O_EXCL always makes a fresh 0600 inode. */
+    (void)unlink(tmp);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
     if (fd < 0)
     {
         return ckr_from_errno(errno);
@@ -163,21 +186,39 @@ CK_RV tsra_pkcs11_store_write(
         unlink(tmp);
         return ckr_from_errno(e);
     }
-    if (rename(tmp, path) != 0) /* atomic: readers see old or new, never partial */
+    /* Both are atomic: readers see old or new, never partial. link() fails
+     * with EEXIST instead of replacing an existing target. */
+    if ((replace ? rename(tmp, path) : link(tmp, path)) != 0)
     {
         int e = errno;
         unlink(tmp);
         return ckr_from_errno(e);
     }
-    /* Persist the rename itself: fsync the directory. Best-effort — the data is
-     * already durable; this only tightens the crash window for the name. */
-    int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (dfd >= 0)
+    if (!replace)
     {
-        (void)fsync(dfd);
-        close(dfd);
+        (void)unlink(tmp); /* a leftover second link is removed by the next write */
     }
-    return CKR_OK;
+    return sync_dir(dir);
+}
+
+CK_RV tsra_pkcs11_store_write(
+    const char *dir,
+    const char *name,
+    const unsigned char *data,
+    size_t len
+)
+{
+    return write_file(dir, name, data, len, true);
+}
+
+CK_RV tsra_pkcs11_store_create(
+    const char *dir,
+    const char *name,
+    const unsigned char *data,
+    size_t len
+)
+{
+    return write_file(dir, name, data, len, false);
 }
 
 CK_RV tsra_pkcs11_store_read(const char *dir, const char *name, unsigned char **out, size_t *len)
@@ -195,7 +236,9 @@ CK_RV tsra_pkcs11_store_read(const char *dir, const char *name, unsigned char **
     {
         return rv;
     }
-    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    /* O_NONBLOCK: opening a FIFO planted under this name would otherwise block
+     * until a writer appears; the regular-file check below then rejects it. */
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0)
     {
         /* Absence is a valid state, not an error (mirrors tsra_file_load). */
@@ -213,19 +256,15 @@ CK_RV tsra_pkcs11_store_read(const char *dir, const char *name, unsigned char **
         close(fd);
         return ckr_from_errno(e);
     }
-    /* Reject anything that is not a plain file, and a size we will not read. */
-    if (!S_ISREG(st.st_mode) || st.st_size < 0 ||
-        (unsigned long long)st.st_size > P11_STORE_MAX_FILE_SIZE)
+    /* Reject anything that is not a plain file, and a size we will not read.
+     * The store never writes an empty file, so an empty one is corrupt. */
+    if ((!S_ISREG(st.st_mode)) || (st.st_size <= 0) ||
+        ((unsigned long long)st.st_size > P11_STORE_MAX_FILE_SIZE))
     {
         close(fd);
         return CKR_FUNCTION_FAILED;
     }
     size_t size = (size_t)st.st_size;
-    if (size == 0) /* empty file: treat as absent */
-    {
-        close(fd);
-        return CKR_OK;
-    }
 
     unsigned char *buf = (unsigned char *)malloc(size);
     if (buf == NULL)
@@ -244,6 +283,7 @@ CK_RV tsra_pkcs11_store_read(const char *dir, const char *name, unsigned char **
                 continue;
             }
             int e = errno;
+            tsra_pkcs11_wipe(buf, size);
             free(buf);
             close(fd);
             return ckr_from_errno(e);
@@ -257,6 +297,7 @@ CK_RV tsra_pkcs11_store_read(const char *dir, const char *name, unsigned char **
     close(fd);
     if (off != size)
     {
+        tsra_pkcs11_wipe(buf, size);
         free(buf);
         return CKR_FUNCTION_FAILED;
     }
@@ -281,7 +322,9 @@ CK_RV tsra_pkcs11_store_unlink(const char *dir, const char *name)
     {
         return ckr_from_errno(errno);
     }
-    return CKR_OK;
+    /* Also when the name was already gone: whoever removed it may not have
+     * synced, and a destroyed object must not come back after a crash. */
+    return sync_dir(dir);
 }
 
 CK_RV tsra_pkcs11_store_lock(const char *dir, int *lock_fd)
@@ -299,8 +342,9 @@ CK_RV tsra_pkcs11_store_lock(const char *dir, int *lock_fd)
         return rv;
     }
     /* Fresh fd per acquisition: flock is per open-file-description, so a shared
-     * fd would let a second acquirer's lock silently succeed. */
-    int fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
+     * fd would let a second acquirer's lock silently succeed. O_NONBLOCK as in
+     * tsra_pkcs11_store_read; it does not make flock(2) non-blocking. */
+    int fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, S_IRUSR | S_IWUSR);
     if (fd < 0)
     {
         return ckr_from_errno(errno);
