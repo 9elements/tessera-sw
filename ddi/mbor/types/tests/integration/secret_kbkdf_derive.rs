@@ -784,8 +784,9 @@ fn test_secret_kbkdf_aes192() {
     );
 }
 
-#[cfg(not(feature = "emu"))]
+#[cfg(not(any(feature = "emu", feature = "sock")))]
 #[test]
+#[ignore = "key_tag support has been removed"]
 fn test_secret_kbkdf_name() {
     ddi_dev_test(
         common_setup,
