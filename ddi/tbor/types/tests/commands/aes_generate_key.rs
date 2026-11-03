@@ -33,8 +33,6 @@ use tsra_ddi_tbor_types::TborAesGenerateKeyReq;
 use tsra_ddi_tbor_types::AES_KEY_SIZE_128;
 use tsra_ddi_tbor_types::AES_KEY_SIZE_192;
 use tsra_ddi_tbor_types::AES_KEY_SIZE_256;
-#[cfg(feature = "emu")]
-use tsra_ddi_tbor_types::AES_MODE_CBC;
 use tsra_ddi_tbor_types::KEY_USAGE_DECRYPT;
 use tsra_ddi_tbor_types::KEY_USAGE_ENCRYPT;
 
@@ -103,6 +101,7 @@ fn generate_key_req(session_id: u16, scope: u8, key_size: u8) -> TborAesGenerate
 mod emu_tests {
     use tsra_ddi_tbor_types::TborAesEncryptDecryptReq;
     use tsra_ddi_tbor_types::TborStatus;
+    use tsra_ddi_tbor_types::AES_MODE_CBC;
     use tsra_ddi_tbor_types::AES_OP_DECRYPT;
     use tsra_ddi_tbor_types::AES_OP_ENCRYPT;
 

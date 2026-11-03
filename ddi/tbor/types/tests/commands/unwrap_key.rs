@@ -254,7 +254,8 @@ fn unwrap_key_all_oaep_hashes() {
     }
 }
 
-/// Verifies an unknown OAEP selector is rejected even for a valid wrapped key.
+/// Verifies unknown OAEP selectors, including the SHAKE XOFs, are rejected
+/// even for a valid wrapped key.
 #[test]
 fn unwrap_key_unknown_oaep_hash_rejected() {
     let ctx = TestCtx::new();
@@ -266,18 +267,20 @@ fn unwrap_key_unknown_oaep_hash_rejected() {
         .expect("GetUnwrappingKey")
         .pub_key;
     let wrapped_blob = rsa_aes_wrap(&hsm_pub, &[0x42u8; 32], HashAlgo::sha256());
-    ctx.expect_fw_reject(
-        &TborUnwrapKeyReq {
-            session_id: session.session_id,
-            scope: SCOPE_LOCAL,
-            key_class: KEY_CLASS_AES,
-            key_usage: usage_for_class(KEY_CLASS_AES),
-            oaep_hash_algo: u8::MAX,
-            wrapped_blob,
-            key_label: Vec::new(),
-        },
-        TborStatus::InvalidArg,
-    );
+    for oaep_hash_algo in [HASH_ALGO_SHAKE128, HASH_ALGO_SHAKE256, u8::MAX] {
+        ctx.expect_fw_reject(
+            &TborUnwrapKeyReq {
+                session_id: session.session_id,
+                scope: SCOPE_LOCAL,
+                key_class: KEY_CLASS_AES,
+                key_usage: usage_for_class(KEY_CLASS_AES),
+                oaep_hash_algo,
+                wrapped_blob: wrapped_blob.clone(),
+                key_label: Vec::new(),
+            },
+            TborStatus::InvalidArg,
+        );
+    }
 }
 
 #[test]
@@ -287,7 +290,7 @@ fn unwrap_key_ecc_p256() {
 
     // Import a host-generated P-256 key (PKCS#8 DER) and check the decode +
     // public-key re-derivation path.
-    let key = EccPrivateKey::generate(32).expect("generate P-256 key");
+    let key = EccPrivateKey::from_curve(EccCurve::P256).expect("generate P-256 key");
     let der = key.to_vec().expect("ECC PKCS#8 DER export");
     let resp = unwrap(&ctx, session.session_id, KEY_CLASS_ECC, &der);
 
