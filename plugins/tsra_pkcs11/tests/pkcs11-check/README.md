@@ -40,8 +40,8 @@ request.
 test passes that is neither listed nor in `baseline.txt`: that test belongs on
 the list. The nightly workflow runs it.
 
-Measured on the mock build (2026-11-04, a shared 8-core host): `--pr` 305 tests
-in 110 s, the gate 1012 tests in 186 s, `--full` about 5 minutes.
+Measured on the mock build (2026-11-04, a shared 8-core host): `--pr` 313 tests
+in 113 s, the gate 1017 tests in 194 s, `--full` about 4.5 minutes.
 
 ## The include-list and the baseline
 
