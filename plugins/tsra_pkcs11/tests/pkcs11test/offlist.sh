@@ -25,7 +25,8 @@ OUT="$HERE/offlist.md"
 RULES=(
     'aes-ecb ^Ciphers/SecretKeyTest\..*/4$'
     'des ^(Ciphers/SecretKeyTest|Duals/DualSecretKeyTest)\..*/[0-3]$'
-    'des ^ReadWriteSessionTest\.(SetLatchingAttribute|FindObjectSubset|TookanAttackA(3|4|5a|5b))$'
+    'des ^ReadWriteSessionTest\.FindObjectSubset$'
+    'sensitive ^RWUserSessionTest\.TookanAttackA(4|5b)$'
     'md5 ^Digests/DigestTest\..*/0$'
     'hmac ^(HMACs/HmacTest\.|ReadOnlySessionTest\.HmacTestVectors$)'
     'rsa-keygen ^(Signatures/SignTest\.|KeyPairTest\.)'
@@ -43,13 +44,12 @@ RULES=(
     'unsupported ^(ROUserSessionTest\.(WrapUnwrap|WrapInvalid|UnwrapInvalid)|RWEitherSessionTest\.TookanAttackA2)$'
     'sdk-lag ^(Ciphers/SecretKeyTest\.EncryptDecryptParts/5|ReadOnlySessionTest\.UserLoginWrongPIN)$'
     'spec-gap ^Ciphers/SecretKeyTest\.EncryptDecryptInitInvalid/5$'
-    'module-bug ^ReadWriteSessionTest\.CreateObjectInvalid$'
 )
 
 # What keeps each bucket off the list, in table order.
-BUCKETS=(des aes-ecb rsa-keygen hmac md5 so rng import unsupported later sdk-lag spec-gap module-bug)
+BUCKETS=(des aes-ecb rsa-keygen hmac md5 so rng import sensitive unsupported later sdk-lag spec-gap)
 declare -A WHY=(
-    [des]="DES or 3DES. The default secret-key fixture generates CKM_DES3_KEY_GEN keys and the SDK has no DES. The latch, FindObjectSubset and Tookan A3 to A5 cases would run on an AES key; an AES fixture patch is planned for them."
+    [des]="DES or 3DES, which the SDK does not have: the cipher and dual-function fixtures' DES cases, and FindObjectSubset, which generates DES keys and RSA key pairs."
     [aes-ecb]="AES-ECB, out of scope for the module. The two IV cases pass without asserting anything: ECB takes no IV."
     [rsa-keygen]="The fixture generates an RSA key pair. The module does not generate RSA keys: they arrive by unwrap, and the signature cases need an unwrap fixture."
     [hmac]="HMAC keys from CKM_GENERIC_SECRET_KEY_GEN, which the SDK cannot generate. The module's HMAC keys come from ECDH plus HKDF, so these fixtures cannot pass."
@@ -57,11 +57,11 @@ declare -A WHY=(
     [so]="The Security Officer. The device session has one user credential, so CKU_SO is refused and the token is presented initialised. pkcs11test skips the SO logins under -X and token initialisation without -I."
     [rng]="Random numbers. The module has no generator."
     [import]="Plaintext key material through C_CreateObject, which is not a way to make keys on this token."
+    [sensitive]="The fixture asks C_GenerateKey for a key with CKA_SENSITIVE=FALSE. Device keys exist only masked, so the token refuses it (CKR_TEMPLATE_INCONSISTENT)."
     [unsupported]="Entry points the module does not offer: C_CopyObject, C_DigestKey, C_GetOperationState, the dual-function calls and key wrapping."
     [later]="C_GenerateKeyPair, not implemented yet (it comes with EC key generation)."
     [sdk-lag]="SDK behaviour the module cannot change: the CBC stream holds back the last full block until the final call (SDK issue #51), and a wrong PIN is the generic -8 (SDK issue #53), so C_Login cannot answer CKR_PIN_INCORRECT."
     [spec-gap]="Expectations this token does not share: CKR_KEY_TYPE_INCONSISTENT for a mechanism it does not offer, and an error for a NULL mechanism, which PKCS#11 3.0 defines as ending the active operation."
-    [module-bug]="Module behaviour scheduled for a fix: C_CreateObject accepting incomplete templates."
 )
 
 # Pass without asserting anything, yet absent from pkcs11test's skip report.
@@ -152,7 +152,7 @@ fi
     echo "# pkcs11test names off the include-list"
     echo
     echo "Written by \`offlist.sh\` from an unfiltered pkcs11test run"
-    echo "($(git -C "$SRC" rev-parse --short=12 HEAD), with the fixture patch) against the"
+    echo "($(git -C "$SRC" rev-parse --short=12 HEAD), with the fixture patches) against the"
     echo "mock-backed module. Do not edit it by hand: change the bucket rules in"
     echo "\`offlist.sh\` and run it again."
     echo

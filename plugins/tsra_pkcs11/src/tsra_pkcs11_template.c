@@ -225,16 +225,18 @@ CK_RV tsra_pkcs11_keygen_check_template(
     CK_KEY_TYPE key_type = 0;
     const CK_ATTRIBUTE *allowed = NULL;
 
-    if (count > KEYGEN_MAX_TEMPLATE_ATTRS)
+    CK_RV rv = tsra_pkcs11_tmpl_check_bounds(tmpl, count);
+    if (rv != CKR_OK)
     {
-        return CKR_ARGUMENTS_BAD;
+        return rv;
     }
     for (CK_ULONG i = 0; i < count; i++)
     {
         const CK_ATTRIBUTE *a = &tmpl[i];
-        if ((a->ulValueLen > 0) && (a->pValue == NULL))
+        rv = tsra_pkcs11_attr_check(a);
+        if (rv != CKR_OK)
         {
-            return CKR_ATTRIBUTE_VALUE_INVALID;
+            return rv;
         }
         /* A type repeated with a different value is inconsistent, and would also
          * split the generation input (last value wins) from what is stored and
@@ -243,9 +245,16 @@ CK_RV tsra_pkcs11_keygen_check_template(
         {
             return CKR_TEMPLATE_INCONSISTENT;
         }
+        if (tsra_pkcs11_attr_is_token_set(a))
+        {
+            return CKR_ATTRIBUTE_READ_ONLY;
+        }
+        if (tsra_pkcs11_attr_is_key_material(a->type))
+        {
+            return CKR_TEMPLATE_INCONSISTENT; /* generated keys take no material */
+        }
         CK_BBOOL b = CK_FALSE;
         CK_ULONG scalar = 0;
-        CK_RV rv = CKR_OK;
         switch (a->type)
         {
         case CKA_CLASS:
@@ -289,7 +298,7 @@ CK_RV tsra_pkcs11_keygen_check_template(
             have_value_len = CK_TRUE;
             break;
         case CKA_ALLOWED_MECHANISMS:
-            if ((a->ulValueLen == 0) || ((a->ulValueLen % sizeof(CK_MECHANISM_TYPE)) != 0) ||
+            if ((a->ulValueLen == 0) ||
                 ((a->ulValueLen / sizeof(CK_MECHANISM_TYPE)) > KEYGEN_MAX_ALLOWED_MECHS))
             {
                 return CKR_ATTRIBUTE_VALUE_INVALID;
@@ -338,20 +347,13 @@ CK_RV tsra_pkcs11_keygen_check_template(
                 return rv;
             }
             break;
-        case CKA_LOCAL:
-        case CKA_ALWAYS_SENSITIVE:
-        case CKA_NEVER_EXTRACTABLE:
-        case CKA_KEY_GEN_MECHANISM:
-            return CKR_ATTRIBUTE_READ_ONLY; /* token-computed, never caller-set */
-        case CKA_VALUE:
-            return CKR_TEMPLATE_INCONSISTENT; /* generated keys take no material */
         default:
             break; /* stored verbatim on the object */
         }
     }
 
     const tsra_pkcs11_keygen_policy *p = NULL;
-    CK_RV rv = resolve_policy(mech, allowed, &p);
+    rv = resolve_policy(mech, allowed, &p);
     if (rv != CKR_OK)
     {
         return rv;
@@ -418,6 +420,13 @@ CK_RV tsra_pkcs11_keygen_build_template(
     }
     tmpl_append(full, &k, tmpl, count, (CK_ATTRIBUTE){ CKA_CLASS, &fill->cls, sizeof(fill->cls) });
     tmpl_append(full, &k, tmpl, count, (CK_ATTRIBUTE){ CKA_KEY_TYPE, &fill->kt, sizeof(fill->kt) });
+    tmpl_append(
+        full,
+        &k,
+        tmpl,
+        count,
+        (CK_ATTRIBUTE){ CKA_PRIVATE, &fill->btrue, sizeof(fill->btrue) }
+    );
     tmpl_append(
         full,
         &k,

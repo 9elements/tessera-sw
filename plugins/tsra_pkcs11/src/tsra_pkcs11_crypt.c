@@ -162,9 +162,9 @@ CK_RV C_GenerateKey(
         return rv;
     }
 
-    /* An absent or malformed CKA_PRIVATE reads as public, the store's default;
-     * the scope does not depend on it. */
-    CK_BBOOL priv = CK_FALSE;
+    /* A generated key is private unless the template says otherwise (see
+     * tsra_pkcs11_keygen_build_template); the scope does not depend on it. */
+    CK_BBOOL priv = CK_TRUE;
     (void)tsra_pkcs11_tmpl_bool(tsra_pkcs11_tmpl_find(pTemplate, ulCount, CKA_PRIVATE), &priv);
 
     CK_BYTE *blob = NULL;
@@ -217,7 +217,8 @@ CK_RV C_GenerateKey(
     {
         /* No half-object: a key object without its masked body, or one the
          * session cannot track, is not handed out. */
-        (void)g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h);
+        (void
+        )g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h, NULL, NULL);
         goto cleanup;
     }
     *phKey = h;

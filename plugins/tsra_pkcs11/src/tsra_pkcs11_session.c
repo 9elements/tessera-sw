@@ -14,7 +14,6 @@
 #include "tsra_pkcs11_digest.h"
 #include "tsra_pkcs11_hsm.h"
 #include "tsra_pkcs11_internal.h"
-#include "tsra_pkcs11_template.h"
 
 #include <stdlib.h>
 
@@ -157,8 +156,8 @@ void tsra_pkcs11_session_destroy_owned(tsra_pkcs11_session_t *s)
         /* A session reaps its own objects whatever the login state is, hence
          * CK_TRUE. An object a sibling session destroyed meanwhile is simply
          * gone: store handles are never reused, so nothing else can be hit. */
-        (void
-        )g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, s->owned[i]);
+        (void)g_tsra_pkcs11.store.ops
+            ->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, s->owned[i], NULL, NULL);
     }
     free(s->owned);
     s->owned = NULL;
@@ -179,7 +178,8 @@ static void destroy_private_owned(tsra_pkcs11_session_t *s)
                          ->get_attr(g_tsra_pkcs11.store.ctx, s->slot, CK_FALSE, h, NULL, 0);
         if (seen == CKR_OBJECT_HANDLE_INVALID)
         {
-            (void)g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h);
+            (void)g_tsra_pkcs11.store.ops
+                ->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h, NULL, NULL);
         }
         else
         {
@@ -539,24 +539,12 @@ CK_RV C_CreateObject(
         tsra_pkcs11_unlock();
         return CKR_SESSION_HANDLE_INVALID;
     }
-    /*
-     * Settle CKA_TOKEN before anything is created: it decides both where the
-     * store puts the object and whether this session owns it, and the backends
-     * read the raw value more loosely than the spec allows. Same verdicts as
-     * C_GenerateKey — a wrongly sized value is invalid, and a token object
-     * needs a read/write session.
-     */
+    /* The store keeps whatever it is handed, so the policy decides first. Its
+     * CKA_TOKEN decides where the store puts the object and whether this
+     * session owns it. */
     CK_BBOOL token = CK_FALSE;
-    const CK_ATTRIBUTE *t = tsra_pkcs11_tmpl_find(pTemplate, ulCount, CKA_TOKEN);
-    CK_RV rv = CKR_OK;
-    if ((t != NULL) && (tsra_pkcs11_tmpl_bool(t, &token) != CKR_OK))
-    {
-        rv = CKR_ATTRIBUTE_VALUE_INVALID;
-    }
-    else if (token && ((s->flags & CKF_RW_SESSION) == 0))
-    {
-        rv = CKR_SESSION_READ_ONLY;
-    }
+    CK_BBOOL rw_session = ((s->flags & CKF_RW_SESSION) != 0) ? CK_TRUE : CK_FALSE;
+    CK_RV rv = tsra_pkcs11_create_check(pTemplate, ulCount, rw_session, &token);
     if (rv != CKR_OK)
     {
         tsra_pkcs11_unlock();
@@ -574,13 +562,18 @@ CK_RV C_CreateObject(
         if (rv != CKR_OK)
         {
             /* Untracked objects are not handed out. */
-            (void
-            )g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, *phObject);
+            (void)g_tsra_pkcs11.store.ops
+                ->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, *phObject, NULL, NULL);
             *phObject = CK_INVALID_HANDLE;
         }
     }
     tsra_pkcs11_unlock();
     return rv;
+}
+
+static CK_RV destroy_check(void *cctx, tsra_pkcs11_objstore_reader read, void *rctx)
+{
+    return tsra_pkcs11_destroy_check(*(const CK_BBOOL *)cctx, read, rctx);
 }
 
 CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
@@ -596,9 +589,17 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
         tsra_pkcs11_unlock();
         return CKR_SESSION_HANDLE_INVALID;
     }
+    /* Judged under the store lock, as in C_SetAttributeValue. */
+    CK_BBOOL rw_session = ((s->flags & CKF_RW_SESSION) != 0) ? CK_TRUE : CK_FALSE;
     CK_BBOOL logged_in = g_tsra_pkcs11.slots[s->slot].user_logged_in ? CK_TRUE : CK_FALSE;
-    CK_RV rv =
-        g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, logged_in, hObject);
+    CK_RV rv = g_tsra_pkcs11.store.ops->destroy(
+        g_tsra_pkcs11.store.ctx,
+        s->slot,
+        logged_in,
+        hObject,
+        destroy_check,
+        &rw_session
+    );
     if (rv == CKR_OK)
     {
         tsra_pkcs11_session_disown_object(s->slot, hObject);
@@ -618,7 +619,8 @@ CK_RV C_GetAttributeValue(
     {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
-    if (pTemplate == NULL_PTR && ulCount > 0)
+    /* The output lengths are capacities, so only the count has a ceiling. */
+    if (((pTemplate == NULL_PTR) && (ulCount > 0)) || (ulCount > TEMPLATE_MAX_ATTRS))
     {
         return CKR_ARGUMENTS_BAD;
     }
@@ -744,8 +746,14 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
         tsra_pkcs11_unlock();
         return CKR_OPERATION_ACTIVE;
     }
+    CK_RV rv = tsra_pkcs11_tmpl_check(pTemplate, ulCount);
+    if (rv != CKR_OK)
+    {
+        tsra_pkcs11_unlock();
+        return rv;
+    }
     CK_BBOOL logged_in = g_tsra_pkcs11.slots[s->slot].user_logged_in ? CK_TRUE : CK_FALSE;
-    CK_RV rv = g_tsra_pkcs11.store.ops->find_init(
+    rv = g_tsra_pkcs11.store.ops->find_init(
         g_tsra_pkcs11.store.ctx,
         s->slot,
         logged_in,

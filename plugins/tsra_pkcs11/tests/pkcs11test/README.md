@@ -14,7 +14,7 @@ requests into the staging branch.
 
 1. clones pkcs11test at the pinned revision (`PKCS11TEST_REV` in the script)
    into the work directory, or reuses a previous clone there,
-2. resets that checkout, applies `hsm-profile-login.patch` (below) and builds
+2. resets that checkout, applies the two fixture patches (below) and builds
    the tool from clean — its makefile has no header dependencies, so an
    incremental build after a header change is silently stale,
 3. runs it against the module with `-s 0 -u <pin> -X` and
@@ -60,20 +60,29 @@ The gate drives the **mock-backed** module (`cargo build --features mock`), not
 the standalone no-device build: every interesting conformance behaviour is
 key-backed and needs a device behind the login.
 
-## The fixture patch (`hsm-profile-login.patch`)
+## The fixture patches
 
-Four one-line changes to pkcs11test's fixture base classes:
+Each patch encodes one policy and stays a few one-line changes. To regenerate
+one against a newer revision, make the same substitutions in a clean checkout
+and `git diff`.
 
-| file | class | from | to |
+### Login profile (`hsm-profile-login.patch`)
+
+Four fixture base classes and five tests change their session class:
+
+| file | class or test | from | to |
 |---|---|---|---|
 | `pkcs11test.h` | `SecretKeyTest` | `ReadOnlySessionTest` | `ROUserSessionTest` |
 | `sign.cc` | `SignTest` | `ReadOnlySessionTest` | `ROUserSessionTest` |
 | `hmac.cc` | `HmacTest` | `ReadOnlySessionTest` | `ROUserSessionTest` |
 | `keypair.cc` | `KeyPairTest` | `ReadWriteSessionTest` | `RWUserSessionTest` |
+| `object.cc` | `SetLatchingAttribute` | `ReadWriteSessionTest` | `RWUserSessionTest` |
+| `tookan.cc` | `TookanAttackA3`, `A4`, `A5a`, `A5b` | `ReadWriteSessionTest` | `RWUserSessionTest` |
 
-i.e. the cipher, signature, MAC and key-pair fixtures log in as the user before
-generating their keys. To regenerate the patch against a newer revision, make
-those same four base-class substitutions in a clean checkout and `git diff`.
+i.e. the cipher, signature, MAC and key-pair fixtures, and the tests that
+generate a secret key in a read/write session, log in as the user before
+generating their keys. The five tests therefore run under the name
+`RWUserSessionTest.<test>`.
 
 Why: pkcs11test's fixtures encode the soft-token model, where key generation
 and use work in a public session. On this token every key operation runs in an
@@ -85,18 +94,28 @@ unchanged against the logged-in profile. Public-object and digest tests need no
 login and are untouched. Auto-opening a device session for public sessions was
 considered and rejected — it would defeat the login.
 
-## What the gate covers today (144 of 330)
+### AES secret keys (`aes-fixture.patch`)
+
+pkcs11test's `SecretKey` helper generates a 3DES key unless its caller names
+a mechanism. The patch makes the default an AES-256 key (`CKM_AES_KEY_GEN`,
+`CKA_VALUE_LEN` 32), the one secret-key type this token generates, so the
+latch and Tookan tests built on the helper test this token's keys. Callers
+that name a mechanism, such as the DES cipher cases, are unchanged.
+
+## What the gate covers today (148 of 330)
 
 Digests (SHA-1/256/384/512, one-shot and multi-part, sizing, the operation
 state machine), the library/slot/session/login surface, public data objects
-(including the `C_SetAttributeValue` argument and read-only checks), BER
-decoding, the AES-CBC cipher tests (one-shot round trip, sizing, wrong key,
+(including the `C_SetAttributeValue` argument and read-only checks and the
+`C_CreateObject` template checks), the key-attribute latches and the readback
+refusal of a sensitive key (`SetLatchingAttribute`, `TookanAttackA3`,
+`TookanAttackA5a`), BER decoding, the AES-CBC cipher tests (one-shot round trip, sizing, wrong key,
 IV validation, argument errors; multi-part argument errors, the final-call
 length rules and the one-shot/multi-part mode rule) and the operation-lifetime
 rules on the cipher and digest entry points, and the answers of the
 random-number functions on a token without a generator (`CKR_RANDOM_NO_RNG`).
 
-A full run reports 170 passing, but 26 of those are deliberately **not** on
+A full run reports 174 passing, but 26 of those are deliberately **not** on
 the list, because they assert nothing: 23 that pkcs11test skips (the MD5
 digest parameter, token initialisation, the SO logins suppressed by `-X`,
 `C_GetOperationState`, the dual-function digest+encrypt), the two AES-ECB IV
@@ -111,17 +130,14 @@ list once the SDK releases unpadded blocks at once), mechanisms this module
 does not implement
 (DES/3DES/AES-ECB, RSA, EC, sign/verify, HMAC, key pairs, wrap/unwrap),
 entry points that are stubs (`C_CopyObject`, `C_DigestKey`), key import
-through `C_CreateObject` with `CKA_VALUE` (the SDK has none), and a few tests
+through `C_CreateObject` with `CKA_VALUE`, which the token refuses, keys that
+are not sensitive (`TookanAttackA4` and `A5b` ask for one, and the device holds
+keys only masked), and a few tests
 whose expectations assume a soft token or predate v3.0. For example
 `EncryptDecryptInitInvalid` wants `CKR_KEY_TYPE_INCONSISTENT` for
 `CKM_RSA_PKCS` on an AES key, where this token, which does not offer RSA,
 answers `CKR_MECHANISM_INVALID`, and an error for a NULL mechanism, which
 v3.0 made the way to end an operation.
-
-The key-attribute latch tests (`SetLatchingAttribute`, `TookanAttackA5a`,
-`TookanAttackA5b`) belong to the 3DES bucket: their fixture hard-codes
-`CKM_DES3_KEY_GEN`. The same latches are checked on AES keys by the gtest
-suite (`integration-tests/cpp/object/attr_tests.cpp`).
 
 A wrong PIN can be checked on the mock: the first login in a process
 provisions the credential, and a later login with another PIN fails. It fails

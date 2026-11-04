@@ -3,10 +3,10 @@
 # Licensed under the MIT License.
 #
 # Conformance gate: builds Google pkcs11test at a pinned revision (with the
-# login-profile fixture patch), runs it against the given module and requires
-# every test named in include-list.txt to pass and to have actually run, once
-# on the memory object store and once on a file store seeded with objects
-# (seed_store.c). See README.md alongside.
+# login-profile and AES fixture patches), runs it against the given module and
+# requires every test named in include-list.txt to pass and to have actually
+# run, once on the memory object store and once on a file store seeded with
+# objects (seed_store.c). See README.md alongside.
 #
 #   run.sh <module.so> [work-dir]
 #
@@ -27,8 +27,8 @@ PIN="${TSRA_PKCS11_TEST_PIN:-1234}"
 INCLUDE="$HERE/include-list.txt"
 # The include-list only grows: fewer names than this fails the gate. Raise the
 # floor when names are added; lowering it is a deliberate edit with a reason.
-FLOOR=144
-PATCH="$HERE/hsm-profile-login.patch"
+FLOOR=148
+PATCHES=("$HERE/hsm-profile-login.patch" "$HERE/aes-fixture.patch")
 SRC="$WORK/src"
 
 fail()
@@ -51,7 +51,7 @@ mapfile -t NAMES < <(
 [ "${#NAMES[@]}" -ge "$FLOOR" ] ||
     fail "include-list names ${#NAMES[@]} tests, fewer than its floor of $FLOOR: $INCLUDE"
 
-# --- 2. Source at the pinned revision, fixture patch applied ----------------
+# --- 2. Source at the pinned revision, fixture patches applied --------------
 mkdir -p "$WORK"
 if [ ! -d "$SRC/.git" ]; then
     # A half-made clone would poison every later run; take it with us.
@@ -60,13 +60,15 @@ fi
 if ! git -C "$SRC" cat-file -e "$REV^{commit}" 2>/dev/null; then
     git -C "$SRC" fetch -q origin || fail "cannot fetch $REV from $REPO"
 fi
-# Clean before checking out: the previous run left the fixture patch applied,
+# Clean before checking out: the previous run left the fixture patches applied,
 # and git refuses to move HEAD across those files once the pin changes.
 git -C "$SRC" reset -q --hard
 git -C "$SRC" clean -qfdx
 git -C "$SRC" checkout -q --detach "$REV" || fail "cannot check out $REV"
-git -C "$SRC" apply "$PATCH" ||
-    fail "the fixture patch does not apply at $REV (regenerate it — see README.md)"
+for patch in "${PATCHES[@]}"; do
+    git -C "$SRC" apply "$patch" ||
+        fail "$(basename "$patch") does not apply at $REV (regenerate it, see README.md)"
+done
 
 # --- 3. Build from clean (the makefile tracks no header dependencies) ------
 make -C "$SRC" -s -j"$(nproc 2>/dev/null || echo 2)" > "$WORK/build.log" 2>&1 ||

@@ -390,9 +390,11 @@ TEST_F(aes_cbc, init_validates_the_key_handle)
 
     // A data object is a valid object handle but backs no key.
     CK_BYTE payload[4] = { 1, 2, 3, 4 };
-    CK_ATTRIBUTE data_tmpl[] = { { CKA_VALUE, payload, sizeof(payload) } };
+    CK_OBJECT_CLASS data = CKO_DATA;
+    CK_ATTRIBUTE data_tmpl[] = { { CKA_CLASS, &data, sizeof(data) },
+                                 { CKA_VALUE, payload, sizeof(payload) } };
     CK_OBJECT_HANDLE data_obj = 0;
-    ASSERT_CKR_OK(p11()->C_CreateObject(s_, data_tmpl, 1, &data_obj));
+    ASSERT_CKR_OK(p11()->C_CreateObject(s_, data_tmpl, 2, &data_obj));
     EXPECT_CKR(CKR_KEY_HANDLE_INVALID, p11()->C_EncryptInit(s_, &pad_, data_obj));
     EXPECT_CKR(CKR_KEY_HANDLE_INVALID, p11()->C_DecryptInit(s_, &raw_, data_obj));
 }

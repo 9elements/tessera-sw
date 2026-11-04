@@ -2,20 +2,24 @@
 // Licensed under the MIT License.
 
 /*
- * Unit test for the C_SetAttributeValue policy
- * (src/tsra_pkcs11_attr_policy.c). No device, no store, no module load: the
- * target object is a fake whose reader mimics the store's get_attr for one
+ * Unit test for the C_CreateObject, C_SetAttributeValue and C_DestroyObject
+ * policy (src/tsra_pkcs11_attr_policy.c). No device, no store, no module load:
+ * the target object is a fake whose reader mimics the store's get_attr for one
  * attribute, including the sensitive-value refusal:
  *
  *   gcc -I ../include/pkcs11-v3.1 -I ../src attr_policy_test.c \
- *       ../src/tsra_pkcs11_attr_policy.c ../src/tsra_pkcs11_template.c \
+ *       ../src/tsra_pkcs11_attr_policy.c ../src/tsra_pkcs11_attr_types.c \
+ *       ../src/tsra_pkcs11_template.c \
  *       -o attr_policy_test && ./attr_policy_test
  *
  * Covers the argument and handle checks, the read-only-session and
- * CKA_MODIFIABLE gates and their order, every class's modifiable and fixed
- * attributes, the three latches (including an absent or malformed stored
- * value), value-shape rejects, duplicates, the TYPE_INVALID vs READ_ONLY split
- * for unlisted types, and first-failure-wins ordering.
+ * CKA_MODIFIABLE gates and their order (and C_DestroyObject's with
+ * CKA_DESTROYABLE), every class's modifiable and fixed attributes, the three
+ * latches (including an absent or malformed stored value), value-shape
+ * rejects, duplicates, the TYPE_INVALID vs READ_ONLY split for unlisted types,
+ * and first-failure-wins ordering; and for C_CreateObject the ceilings, the
+ * class rows (no class, key classes with and without key material), the
+ * provenance rows and the per-attribute verdicts.
  */
 
 #include "tsra_pkcs11_attr_policy.h"
@@ -186,7 +190,7 @@ static void test_arguments(void)
         tsra_pkcs11_setattr_check(NULL, 0, CK_TRUE, fake_read, &o) == CKR_OK,
         "empty template on a valid object -> OK"
     );
-    CK_ATTRIBUTE many[SETATTR_MAX_TEMPLATE_ATTRS + 1];
+    CK_ATTRIBUTE many[TEMPLATE_MAX_ATTRS + 1];
     for (size_t i = 0; i < COUNT(many); i++)
     {
         many[i] = (CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label);
@@ -255,6 +259,49 @@ static void test_session_and_modifiable(void)
     );
 }
 
+static void test_destroy(void)
+{
+    printf("== C_DestroyObject ==\n");
+    const CK_ATTRIBUTE token_obj[] = { ATTR(CKA_CLASS, g_data), BOOL_ATTR(CKA_TOKEN, g_true) };
+    const CK_ATTRIBUTE kept[] = { ATTR(CKA_CLASS, g_data), BOOL_ATTR(CKA_DESTROYABLE, g_false) };
+    const CK_ATTRIBUTE kept_wide[] = { ATTR(CKA_CLASS, g_data), ATTR(CKA_DESTROYABLE, g_wide) };
+    const CK_ATTRIBUTE kept_token[] = { BOOL_ATTR(CKA_TOKEN, g_true),
+                                        BOOL_ATTR(CKA_DESTROYABLE, g_false) };
+    fake_obj token = { token_obj, COUNT(token_obj), CKR_OK };
+    fake_obj k = { kept, COUNT(kept), CKR_OK };
+    fake_obj kw = { kept_wide, COUNT(kept_wide), CKR_OK };
+    fake_obj kt = { kept_token, COUNT(kept_token), CKR_OK };
+    fake_obj gone = { NULL, 0, CKR_OBJECT_HANDLE_INVALID };
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_FALSE, fake_read, &token) == CKR_SESSION_READ_ONLY,
+        "token object in a read-only session -> SESSION_READ_ONLY"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_TRUE, fake_read, &token) == CKR_OK,
+        "token object in a read/write session -> OK"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_FALSE, fake_read, &k) == CKR_ACTION_PROHIBITED,
+        "CKA_DESTROYABLE=FALSE -> ACTION_PROHIBITED"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_TRUE, fake_read, &kw) == CKR_ACTION_PROHIBITED,
+        "malformed stored CKA_DESTROYABLE reads as FALSE"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_FALSE, fake_read, &kt) == CKR_SESSION_READ_ONLY,
+        "read-only session is checked before CKA_DESTROYABLE"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_TRUE, fake_read, &gone) == CKR_OBJECT_HANDLE_INVALID,
+        "invisible object -> OBJECT_HANDLE_INVALID"
+    );
+    CHECK(
+        tsra_pkcs11_destroy_check(CK_TRUE, NULL, &k) == CKR_ARGUMENTS_BAD,
+        "NULL reader -> ARGUMENTS_BAD"
+    );
+}
+
 static void test_secret_key(void)
 {
     printf("== secret key: modifiable ==\n");
@@ -311,18 +358,8 @@ static void test_secret_key(void)
         "CKA_VALUE_LEN"
     );
     static const CK_ATTRIBUTE_TYPE fixed[] = {
-        CKA_TOKEN,
-        CKA_PRIVATE,
-        CKA_MODIFIABLE,
-        CKA_COPYABLE,
-        CKA_DESTROYABLE,
-        CKA_LOCAL,
-        CKA_ALWAYS_SENSITIVE,
-        CKA_NEVER_EXTRACTABLE,
-        CKA_KEY_GEN_MECHANISM,
-        CKA_CHECK_VALUE,
-        CKA_ALLOWED_MECHANISMS,
-        CKA_UNIQUE_ID,
+        CKA_TOKEN, CKA_PRIVATE,          CKA_MODIFIABLE,        CKA_COPYABLE,    CKA_DESTROYABLE,
+        CKA_LOCAL, CKA_ALWAYS_SENSITIVE, CKA_NEVER_EXTRACTABLE, CKA_CHECK_VALUE, CKA_UNIQUE_ID,
     };
     for (size_t i = 0; i < COUNT(fixed); i++)
     {
@@ -331,6 +368,16 @@ static void test_secret_key(void)
             "fixed key/storage attribute, carried or not"
         );
     }
+    CK_MECHANISM_TYPE kgm = CKM_AES_KEY_GEN;
+    CHECK(
+        on_key((CK_ATTRIBUTE)ATTR(CKA_KEY_GEN_MECHANISM, kgm)) == CKR_ATTRIBUTE_READ_ONLY,
+        "CKA_KEY_GEN_MECHANISM"
+    );
+    CK_MECHANISM_TYPE cbc[] = { CKM_AES_CBC };
+    CHECK(
+        on_key((CK_ATTRIBUTE)ATTR(CKA_ALLOWED_MECHANISMS, cbc)) == CKR_ATTRIBUTE_READ_ONLY,
+        "CKA_ALLOWED_MECHANISMS"
+    );
     CHECK(
         on_key((CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN_RECOVER, g_true)) == CKR_ATTRIBUTE_TYPE_INVALID,
         "private-key-only CKA_SIGN_RECOVER on a secret key -> TYPE_INVALID"
@@ -544,16 +591,271 @@ static void test_shapes_and_order(void)
         tsra_pkcs11_setattr_check(order2, 2, CK_TRUE, fake_read, &o) == CKR_ATTRIBUTE_READ_ONLY,
         "first failure wins (read-only before value)"
     );
+
+    CK_BBOOL yes = CK_TRUE;
+    CK_ATTRIBUTE inner[] = { BOOL_ATTR(CKA_ENCRYPT, yes) };
+    CHECK(
+        on_key((CK_ATTRIBUTE)ATTR(CKA_WRAP_TEMPLATE, inner)) == CKR_ATTRIBUTE_TYPE_INVALID,
+        "an attribute array -> TYPE_INVALID"
+    );
+    CK_ATTRIBUTE huge = { CKA_LABEL, g_label, 0xFFFFFFFFUL };
+    CHECK(
+        tsra_pkcs11_setattr_check(&huge, 1, CK_TRUE, fake_read, &o) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "a value over the byte ceiling -> VALUE_INVALID, unread"
+    );
+}
+
+/* ========================================================================= */
+/* C_CreateObject                                                            */
+/* ========================================================================= */
+
+static CK_RV create(const CK_ATTRIBUTE *tmpl, CK_ULONG count)
+{
+    CK_BBOOL token = CK_FALSE;
+    return tsra_pkcs11_create_check(tmpl, count, CK_TRUE, &token);
+}
+
+/* A template of class `cls` plus one more attribute. */
+static CK_RV create_with(CK_OBJECT_CLASS cls, CK_ATTRIBUTE extra)
+{
+    CK_ATTRIBUTE t[] = { ATTR(CKA_CLASS, cls), extra };
+    return create(t, COUNT(t));
+}
+
+static void test_create(void)
+{
+    printf("== C_CreateObject: arguments and token ==\n");
+    CK_ATTRIBUTE data[] = { ATTR(CKA_CLASS, g_data), ATTR(CKA_LABEL, g_label) };
+    CHECK(
+        tsra_pkcs11_create_check(data, COUNT(data), CK_TRUE, NULL) == CKR_ARGUMENTS_BAD,
+        "NULL token output -> ARGUMENTS_BAD"
+    );
+    CHECK(create(NULL, 1) == CKR_ARGUMENTS_BAD, "NULL template with count 1 -> ARGUMENTS_BAD");
+    CK_ATTRIBUTE many[TEMPLATE_MAX_ATTRS + 1];
+    for (size_t i = 0; i < COUNT(many); i++)
+    {
+        many[i] = (CK_ATTRIBUTE){ CKA_VENDOR_DEFINED + i, g_label, 1 };
+    }
+    many[0] = (CK_ATTRIBUTE)ATTR(CKA_CLASS, g_data);
+    CHECK(create(many, TEMPLATE_MAX_ATTRS) == CKR_OK, "TEMPLATE_MAX_ATTRS attributes -> OK");
+    CHECK(create(many, TEMPLATE_MAX_ATTRS + 1) == CKR_ARGUMENTS_BAD, "one more -> ARGUMENTS_BAD");
+    CK_ATTRIBUTE huge[] = { ATTR(CKA_CLASS, g_data), { CKA_LABEL, g_label, 0xFFFFFFFFUL } };
+    CHECK(
+        create(huge, COUNT(huge)) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "a 0xFFFFFFFF label -> VALUE_INVALID, unread"
+    );
+    CK_BBOOL token = CK_TRUE;
+    CHECK(
+        (tsra_pkcs11_create_check(data, COUNT(data), CK_TRUE, &token) == CKR_OK) &&
+            (token == CK_FALSE),
+        "CKA_TOKEN absent -> a session object"
+    );
+    CK_ATTRIBUTE tok[] = { ATTR(CKA_CLASS, g_data), BOOL_ATTR(CKA_TOKEN, g_true) };
+    CHECK(
+        (tsra_pkcs11_create_check(tok, COUNT(tok), CK_TRUE, &token) == CKR_OK) &&
+            (token == CK_TRUE),
+        "CKA_TOKEN=TRUE -> a token object"
+    );
+
+    printf("== C_CreateObject: read-only session ==\n");
+    CHECK(
+        tsra_pkcs11_create_check(tok, COUNT(tok), CK_FALSE, &token) == CKR_SESSION_READ_ONLY,
+        "a token object -> SESSION_READ_ONLY"
+    );
+    CHECK(
+        tsra_pkcs11_create_check(data, COUNT(data), CK_FALSE, &token) == CKR_OK,
+        "a session object -> OK"
+    );
+    CK_ATTRIBUTE token_key[] = { ATTR(CKA_CLASS, g_secret),
+                                 BOOL_ATTR(CKA_TOKEN, g_true),
+                                 ATTR(CKA_VALUE, g_secret_bytes) };
+    CHECK(
+        tsra_pkcs11_create_check(token_key, COUNT(token_key), CK_FALSE, &token) ==
+            CKR_SESSION_READ_ONLY,
+        "a token secret key with material -> SESSION_READ_ONLY before the class rules"
+    );
+    CHECK(
+        tsra_pkcs11_create_check(token_key, COUNT(token_key), CK_TRUE, &token) ==
+            CKR_TEMPLATE_INCONSISTENT,
+        "the same in a read/write session -> TEMPLATE_INCONSISTENT"
+    );
+    CK_ATTRIBUTE token_bad[] = { ATTR(CKA_CLASS, g_data),
+                                 BOOL_ATTR(CKA_TOKEN, g_true),
+                                 ATTR(CKA_ENCRYPT, g_wide) };
+    CHECK(
+        tsra_pkcs11_create_check(token_bad, COUNT(token_bad), CK_FALSE, &token) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "a wrongly sized value still comes first"
+    );
+
+    printf("== C_CreateObject: class rows ==\n");
+    CHECK(create(NULL, 0) == CKR_TEMPLATE_INCOMPLETE, "empty template -> TEMPLATE_INCOMPLETE");
+    CK_ATTRIBUTE value_only[] = { ATTR(CKA_VALUE, g_secret_bytes) };
+    CHECK(
+        create(value_only, 1) == CKR_TEMPLATE_INCOMPLETE,
+        "CKA_VALUE without CKA_CLASS -> TEMPLATE_INCOMPLETE"
+    );
+    CHECK(create(data, COUNT(data)) == CKR_OK, "a data object");
+    CHECK(
+        create_with(g_data, (CK_ATTRIBUTE)ATTR(CKA_VALUE, g_secret_bytes)) == CKR_OK,
+        "a data object with CKA_VALUE"
+    );
+    CHECK(
+        create_with(g_cert, (CK_ATTRIBUTE)ATTR(CKA_VALUE, g_secret_bytes)) == CKR_OK,
+        "a certificate with CKA_VALUE"
+    );
+    CHECK(
+        create_with(g_public, (CK_ATTRIBUTE)ATTR(CKA_MODULUS, g_secret_bytes)) == CKR_OK,
+        "a public key without key material"
+    );
+    static const CK_OBJECT_CLASS unsupported[] = {
+        CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS, CKO_MECHANISM, CKO_OTP_KEY,
+        CKO_PROFILE,    CKO_VENDOR_DEFINED,    0xDEADBEEFUL,
+    };
+    int refused = 1;
+    for (size_t c = 0; c < COUNT(unsupported); c++)
+    {
+        refused &=
+            (create_with(unsupported[c], (CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label)) ==
+             CKR_ATTRIBUTE_VALUE_INVALID);
+    }
+    CHECK(refused, "any other class, vendor-defined and 0xDEADBEEF included -> VALUE_INVALID");
+    CK_OBJECT_CLASS bogus = 0xDEADBEEFUL;
+    CK_ATTRIBUTE bogus_token[] = { ATTR(CKA_CLASS, bogus), BOOL_ATTR(CKA_TOKEN, g_true) };
+    CHECK(
+        tsra_pkcs11_create_check(bogus_token, COUNT(bogus_token), CK_FALSE, &token) ==
+            CKR_SESSION_READ_ONLY,
+        "an unsupported token object in a read-only session -> SESSION_READ_ONLY first"
+    );
+    static const CK_ATTRIBUTE_TYPE material[] = {
+        CKA_VALUE,      CKA_PRIVATE_EXPONENT, CKA_PRIME_1,     CKA_PRIME_2,
+        CKA_EXPONENT_1, CKA_EXPONENT_2,       CKA_COEFFICIENT,
+    };
+    const CK_OBJECT_CLASS key_classes[] = { g_secret, g_private, g_public };
+    int ok = 1;
+    for (size_t c = 0; c < COUNT(key_classes); c++)
+    {
+        for (size_t i = 0; i < COUNT(material); i++)
+        {
+            CK_ATTRIBUTE m = { material[i], g_secret_bytes, sizeof(g_secret_bytes) };
+            ok &= (create_with(key_classes[c], m) == CKR_TEMPLATE_INCONSISTENT);
+        }
+    }
+    CHECK(ok, "a secret, private or public key with key material -> TEMPLATE_INCONSISTENT");
+    CHECK(
+        create_with(g_secret, (CK_ATTRIBUTE){ CKA_VALUE, NULL, 0 }) == CKR_TEMPLATE_INCONSISTENT,
+        "an empty CKA_VALUE on a secret key -> TEMPLATE_INCONSISTENT"
+    );
+    CHECK(
+        create_with(g_secret, (CK_ATTRIBUTE)ATTR(CKA_KEY_TYPE, g_aes)) == CKR_TEMPLATE_INCOMPLETE,
+        "a secret key without material -> TEMPLATE_INCOMPLETE"
+    );
+    CHECK(
+        create_with(g_private, (CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label)) == CKR_TEMPLATE_INCOMPLETE,
+        "a private key without material -> TEMPLATE_INCOMPLETE"
+    );
+
+    printf("== C_CreateObject: provenance rows ==\n");
+    static const CK_ATTRIBUTE_TYPE provenance[] = {
+        CKA_LOCAL,
+        CKA_ALWAYS_SENSITIVE,
+        CKA_NEVER_EXTRACTABLE,
+    };
+    ok = 1;
+    for (size_t i = 0; i < COUNT(provenance); i++)
+    {
+        ok &=
+            (create_with(g_data, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_true)) ==
+             CKR_ATTRIBUTE_READ_ONLY);
+        ok &=
+            (create_with(g_public, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_false)) ==
+             CKR_ATTRIBUTE_READ_ONLY);
+        ok &=
+            (create_with(g_cert, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_true)) ==
+             CKR_ATTRIBUTE_READ_ONLY);
+    }
+    CHECK(ok, "LOCAL/ALWAYS_SENSITIVE/NEVER_EXTRACTABLE, either value -> READ_ONLY");
+    CHECK(
+        (create_with(g_cert, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_true)) ==
+         CKR_ATTRIBUTE_READ_ONLY) &&
+            (create_with(g_data, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_true)) ==
+             CKR_ATTRIBUTE_READ_ONLY),
+        "CKA_TRUSTED=TRUE -> READ_ONLY (the Security Officer's)"
+    );
+    CHECK(
+        (create_with(g_cert, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK) &&
+            (create_with(g_public, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK),
+        "CKA_TRUSTED=FALSE, the default -> OK"
+    );
+    CK_MECHANISM_TYPE kgm = CKM_AES_KEY_GEN;
+    CHECK(
+        create_with(g_public, (CK_ATTRIBUTE)ATTR(CKA_KEY_GEN_MECHANISM, kgm)) ==
+            CKR_ATTRIBUTE_READ_ONLY,
+        "CKA_KEY_GEN_MECHANISM -> READ_ONLY"
+    );
+    CHECK(
+        create_with(g_data, (CK_ATTRIBUTE)ATTR(CKA_UNIQUE_ID, g_label)) == CKR_ATTRIBUTE_READ_ONLY,
+        "CKA_UNIQUE_ID -> READ_ONLY"
+    );
+
+    printf("== C_CreateObject: shapes and order ==\n");
+    CK_BYTE v8[8] = { 0 };
+    CHECK(
+        create_with(g_data, (CK_ATTRIBUTE)ATTR(CKA_PRIVATE, v8)) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "an 8-byte CK_BBOOL -> VALUE_INVALID"
+    );
+    CHECK(
+        create_with(g_data, (CK_ATTRIBUTE)ATTR(CKA_START_DATE, g_bad_dates[0])) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "an invalid CK_DATE -> VALUE_INVALID"
+    );
+    CK_ATTRIBUTE short_class[] = { { CKA_CLASS, &g_data, 2 } };
+    CHECK(create(short_class, 1) == CKR_ATTRIBUTE_VALUE_INVALID, "a 2-byte CKA_CLASS");
+    CK_BBOOL yes = CK_TRUE;
+    CK_ATTRIBUTE inner[] = { BOOL_ATTR(CKA_ENCRYPT, yes) };
+    CHECK(
+        create_with(g_data, (CK_ATTRIBUTE)ATTR(CKA_WRAP_TEMPLATE, inner)) ==
+            CKR_ATTRIBUTE_TYPE_INVALID,
+        "an attribute array -> TYPE_INVALID"
+    );
+    CK_ATTRIBUTE dup[] = { ATTR(CKA_CLASS, g_data), ATTR(CKA_CLASS, g_secret) };
+    CHECK(create(dup, COUNT(dup)) == CKR_TEMPLATE_INCONSISTENT, "a repeated CKA_CLASS");
+    /* Every per-attribute verdict comes before the class verdicts. */
+    CK_ATTRIBUTE key_then_wide[] = { ATTR(CKA_CLASS, g_secret),
+                                     ATTR(CKA_VALUE, g_secret_bytes),
+                                     ATTR(CKA_ENCRYPT, v8) };
+    CHECK(
+        create(key_then_wide, COUNT(key_then_wide)) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "[secret key, CKA_VALUE, wide bool] -> the bool verdict"
+    );
+    CK_ATTRIBUTE wide_then_local[] = { ATTR(CKA_ENCRYPT, v8), BOOL_ATTR(CKA_LOCAL, g_true) };
+    CK_ATTRIBUTE local_then_wide[] = { BOOL_ATTR(CKA_LOCAL, g_true), ATTR(CKA_ENCRYPT, v8) };
+    CHECK(
+        (create(wide_then_local, 2) == CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (create(local_then_wide, 2) == CKR_ATTRIBUTE_READ_ONLY),
+        "first failure wins in template order"
+    );
+    /* At odd addresses the class is copied out, not dereferenced (UBSan). */
+    static unsigned char raw[sizeof(CK_OBJECT_CLASS) + 1];
+    memcpy(raw + 1, &g_private, sizeof(g_private));
+    CK_ATTRIBUTE odd[] = { { CKA_CLASS, raw + 1, sizeof(CK_OBJECT_CLASS) },
+                           ATTR(CKA_PRIVATE_EXPONENT, g_secret_bytes) };
+    CHECK(
+        create(odd, COUNT(odd)) == CKR_TEMPLATE_INCONSISTENT,
+        "an unaligned CKA_CLASS still names a private key"
+    );
 }
 
 int main(void)
 {
     test_arguments();
     test_session_and_modifiable();
+    test_destroy();
     test_secret_key();
     test_latches();
     test_other_classes();
     test_shapes_and_order();
+    test_create();
     printf(
         g_fail ? "\nattr_policy_test: FAILED (%d checks)\n"
                : "\nattr_policy_test: all %d checks passed\n",

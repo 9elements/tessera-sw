@@ -30,6 +30,7 @@
  * and read.
  */
 
+#include "tsra_pkcs11_attr_types.h"
 #include "tsra_pkcs11_objstore.h"
 #include "tsra_pkcs11_store_io.h"
 #include "tsra_pkcs11_store_record.h"
@@ -448,62 +449,28 @@ static CK_RV file_create(
     return st->mem.ops->create(st->mem.ctx, slot, user_logged_in, tmpl, count, out);
 }
 
-static CK_RV file_destroy(void *ctx, CK_SLOT_ID slot, CK_BBOOL user_logged_in, CK_OBJECT_HANDLE h)
-{
-    file_store *st = (file_store *)ctx;
-    if ((h & P11_FILE_TOKEN_FLAG) == 0)
-    {
-        return st->mem.ops->destroy(st->mem.ctx, slot, user_logged_in, h);
-    }
-
-    char dir[P11_FILE_TOKEN_DIR_LEN];
-    int lock_fd = -1;
-    CK_RV rv = lock_token_dir(st, slot, dir, sizeof(dir), &lock_fd);
-    if (rv != CKR_OK)
-    {
-        return rv;
-    }
-    /* Check visibility (existence + private gate) before removing. */
-    tsra_pkcs11_rec_object o;
-    rv = load_visible_token_object(st, slot, user_logged_in, h, &o);
-    if (rv != CKR_OK)
-    {
-        tsra_pkcs11_store_unlock(lock_fd);
-        return rv;
-    }
-    tsra_pkcs11_record_free(&o);
-
-    char name[P11_FILE_OBJ_NAME_LEN];
-    object_name(h & ~P11_FILE_TOKEN_FLAG, name, sizeof(name));
-    rv = tsra_pkcs11_store_unlink(dir, name);
-    tsra_pkcs11_store_unlock(lock_fd);
-    return rv;
-}
-
 /* get_attr over a decoded record; the same §5.7.5 outcomes as the in-memory
  * backend's read_attrs. */
 static CK_RV read_rec_attrs(const tsra_pkcs11_rec_object *o, CK_ATTRIBUTE *tmpl, CK_ULONG count)
 {
-    /* Sensitive or non-extractable secret material must not be revealed
-     * (identical rule to the in-memory backend). */
+    /* Identical rule to the in-memory backend. */
     CK_BBOOL sensitive =
         rec_bool(o, CKA_SENSITIVE, CK_FALSE) || !rec_bool(o, CKA_EXTRACTABLE, CK_TRUE);
 
     CK_RV ret = CKR_OK;
     for (CK_ULONG i = 0; i < count; i++)
     {
+        if (sensitive && tsra_pkcs11_attr_is_key_material(tmpl[i].type))
+        {
+            tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            ret = CKR_ATTRIBUTE_SENSITIVE;
+            continue;
+        }
         const tsra_pkcs11_rec_attr *a = rec_find(o, tmpl[i].type);
         if (a == NULL)
         {
             tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
             ret = CKR_ATTRIBUTE_TYPE_INVALID;
-            continue;
-        }
-        CK_BBOOL secret = (tmpl[i].type == CKA_VALUE || tmpl[i].type == CKA_PRIVATE_EXPONENT);
-        if (sensitive && secret)
-        {
-            tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-            ret = CKR_ATTRIBUTE_SENSITIVE;
             continue;
         }
         if (tmpl[i].pValue == NULL_PTR)
@@ -526,10 +493,56 @@ static CK_RV read_rec_attrs(const tsra_pkcs11_rec_object *o, CK_ATTRIBUTE *tmpl,
     return ret;
 }
 
-/* The tsra_pkcs11_objstore_reader a set_attr check sees a locked record through. */
+/* The tsra_pkcs11_objstore_reader a check sees a locked record through. */
 static CK_RV read_rec_one(void *rctx, CK_ATTRIBUTE *a)
 {
     return read_rec_attrs((const tsra_pkcs11_rec_object *)rctx, a, 1);
+}
+
+static CK_RV file_destroy(
+    void *ctx,
+    CK_SLOT_ID slot,
+    CK_BBOOL user_logged_in,
+    CK_OBJECT_HANDLE h,
+    tsra_pkcs11_objstore_check check,
+    void *cctx
+)
+{
+    file_store *st = (file_store *)ctx;
+    if ((h & P11_FILE_TOKEN_FLAG) == 0)
+    {
+        return st->mem.ops->destroy(st->mem.ctx, slot, user_logged_in, h, check, cctx);
+    }
+
+    char dir[P11_FILE_TOKEN_DIR_LEN];
+    int lock_fd = -1;
+    CK_RV rv = lock_token_dir(st, slot, dir, sizeof(dir), &lock_fd);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    /* Check visibility (existence + private gate) before removing. */
+    tsra_pkcs11_rec_object o;
+    rv = load_visible_token_object(st, slot, user_logged_in, h, &o);
+    if (rv != CKR_OK)
+    {
+        tsra_pkcs11_store_unlock(lock_fd);
+        return rv;
+    }
+    if (check != NULL)
+    {
+        rv = check(cctx, read_rec_one, &o);
+    }
+    tsra_pkcs11_record_free(&o);
+
+    if (rv == CKR_OK)
+    {
+        char name[P11_FILE_OBJ_NAME_LEN];
+        object_name(h & ~P11_FILE_TOKEN_FLAG, name, sizeof(name));
+        rv = tsra_pkcs11_store_unlink(dir, name);
+    }
+    tsra_pkcs11_store_unlock(lock_fd);
+    return rv;
 }
 
 static CK_RV file_get_attr(

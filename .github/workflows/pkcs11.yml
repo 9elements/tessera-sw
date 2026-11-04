@@ -69,6 +69,17 @@ jobs:
           pkcs11-tool --module "$TSRA_PKCS11_MODULE" --login --pin 1234 --keygen \
             --key-type aes:32 --label ci-aes --sensitive
 
+      # Keys enter the token only by generation or unwrap.
+      - name: Plaintext key import via pkcs11-tool is refused
+        run: |
+          set -euo pipefail
+          printf '0123456789abcdef' > "$RUNNER_TEMP/import.key"
+          pkcs11-tool --module "$TSRA_PKCS11_MODULE" --login --pin 1234 \
+            --write-object "$RUNNER_TEMP/import.key" --type secrkey --key-type AES:16 \
+            --label ci-import > "$RUNNER_TEMP/import.log" 2>&1 || true
+          cat "$RUNNER_TEMP/import.log"
+          grep -q CKR_TEMPLATE_INCONSISTENT "$RUNNER_TEMP/import.log"
+
       # GoogleTest suite driving the module ABI against the mock-backed build,
       # one process per test case via gtest_discover_tests. It runs twice:
       # on the memory object store and on the file store.
@@ -134,6 +145,30 @@ jobs:
         run: |
           SANITIZE=${{ matrix.sanitize }} plugins/tsra_pkcs11/tests/build_units.sh \
             "$RUNNER_TEMP/units"
+
+  # libFuzzer over the device-free template decoders (tests/template_fuzz.c),
+  # 60 s per run under ASan and UBSan. A finding prints the input as base64.
+  template-fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install clang and the libFuzzer runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libclang-rt-18-dev
+
+      - name: Fuzz the template decoders for 60 s
+        run: |
+          set -euo pipefail
+          p=plugins/tsra_pkcs11
+          clang-18 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
+            -I"$p/include/pkcs11-v3.1" -I"$p/src" "$p/tests/template_fuzz.c" \
+            "$p/src/tsra_pkcs11_attr_types.c" "$p/src/tsra_pkcs11_attr_policy.c" \
+            "$p/src/tsra_pkcs11_template.c" -o "$RUNNER_TEMP/template_fuzz"
+          mkdir -p "$RUNNER_TEMP/fuzz-corpus"
+          cd "$RUNNER_TEMP"
+          ./template_fuzz -max_total_time=60 -print_final_stats=1 fuzz-corpus
 
   # The GoogleTest suite against a module built with AddressSanitizer. CFLAGS
   # and LDFLAGS reach the module's CMake build through cargo; the suite is

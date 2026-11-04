@@ -37,7 +37,7 @@ else
 fi
 
 STORE="tsra_pkcs11_objstore_file.c tsra_pkcs11_objstore_mem.c tsra_pkcs11_store_io.c \
-tsra_pkcs11_store_record.c"
+tsra_pkcs11_store_record.c tsra_pkcs11_attr_types.c"
 
 # One harness per line: tests/<name>.c, then the src/ files it links.
 HARNESS=(
@@ -46,9 +46,11 @@ HARNESS=(
     "record_test tsra_pkcs11_store_record.c"
     "objstore_file_test $STORE"
     "objstore_stress_test $STORE"
-    "aes_template_test tsra_pkcs11_template.c tsra_pkcs11_status.c"
-    "attr_policy_test tsra_pkcs11_attr_policy.c tsra_pkcs11_template.c"
-    "mech_table_test tsra_pkcs11_mech.c tsra_pkcs11_template.c tsra_pkcs11_digest.c"
+    "aes_template_test tsra_pkcs11_template.c tsra_pkcs11_attr_types.c tsra_pkcs11_status.c"
+    "attr_types_test tsra_pkcs11_attr_types.c"
+    "attr_policy_test tsra_pkcs11_attr_policy.c tsra_pkcs11_attr_types.c tsra_pkcs11_template.c"
+    "mech_table_test tsra_pkcs11_mech.c tsra_pkcs11_template.c tsra_pkcs11_attr_types.c \
+tsra_pkcs11_digest.c"
     "config_test tsra_pkcs11_config.c tsra_pkcs11_store_io.c"
     "config_file_test tsra_pkcs11_config.c tsra_pkcs11_store_io.c"
 )

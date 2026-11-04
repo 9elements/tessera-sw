@@ -56,6 +56,7 @@ set(SOURCE
     session/logout_tests.cpp
     object/attr_tests.cpp
     object/persist_tests.cpp
+    object/policy_tests.cpp
 )
 add_executable(tsra_pkcs11_cpp_tests ${SOURCE})
 target_include_directories(

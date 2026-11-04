@@ -148,6 +148,7 @@ ReadOnlySessionTest.SessionInfo
 ReadOnlySessionTest.UserLoginInvalid
 ReadWriteSessionTest.CloseSessionInvalid
 ReadWriteSessionTest.ConsistentObjects
+ReadWriteSessionTest.CreateObjectInvalid
 ReadWriteSessionTest.EnumerateObjects
 ReadWriteSessionTest.InvalidSessionInfo
 ReadWriteSessionTest.SessionInfo
@@ -158,4 +159,7 @@ ROUserSessionTest.LogoutInvalid
 ROUserSessionTest.UserLoginAlreadyLoggedIn
 RWUserSessionTest.EnumerateObjects
 RWUserSessionTest.LogoutInvalid
+RWUserSessionTest.SetLatchingAttribute
+RWUserSessionTest.TookanAttackA3
+RWUserSessionTest.TookanAttackA5a
 Slot.NoInit

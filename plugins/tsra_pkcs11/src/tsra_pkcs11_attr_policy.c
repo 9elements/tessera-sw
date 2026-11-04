@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 /*
- * C_SetAttributeValue policy (see tsra_pkcs11_attr_policy.h).
+ * C_CreateObject, C_SetAttributeValue and C_DestroyObject policy (see
+ * tsra_pkcs11_attr_policy.h).
  */
 
 #include "tsra_pkcs11_attr_policy.h"
@@ -16,15 +17,14 @@
 #define P11_CLS_SECRET 0x02u
 #define P11_CLS_PUBLIC 0x04u
 #define P11_CLS_PRIVATE 0x08u
-#define P11_CLS_OTHER 0x10u /* any other class, or none recorded */
+#define P11_CLS_CERT 0x10u
+#define P11_CLS_OTHER 0x20u /* any other class, or none recorded */
 #define P11_CLS_KEY (P11_CLS_SECRET | P11_CLS_PUBLIC | P11_CLS_PRIVATE)
-#define P11_CLS_ANY (P11_CLS_DATA | P11_CLS_KEY | P11_CLS_OTHER)
+#define P11_CLS_ANY (P11_CLS_DATA | P11_CLS_CERT | P11_CLS_KEY | P11_CLS_OTHER)
 
 typedef enum
 {
-    P11_VAL_BYTES = 0,   /* any value */
-    P11_VAL_BOOL,        /* a CK_BBOOL */
-    P11_VAL_DATE,        /* a CK_DATE, or empty */
+    P11_VAL_ANY = 0,     /* any value of the attribute's type */
     P11_VAL_LATCH_TRUE,  /* a CK_BBOOL that, once TRUE, stays TRUE */
     P11_VAL_LATCH_FALSE, /* a CK_BBOOL that, once FALSE, stays FALSE */
     P11_VAL_FIXED,       /* defined for the class, never modifiable */
@@ -47,20 +47,20 @@ typedef struct
  * is read-only if the object carries it and invalid if it does not.
  */
 static const attr_rule ATTR_RULES[] = {
-    { CKA_LABEL, P11_CLS_ANY, P11_VAL_BYTES },
-    { CKA_ID, P11_CLS_KEY, P11_VAL_BYTES },
-    { CKA_START_DATE, P11_CLS_KEY, P11_VAL_DATE },
-    { CKA_END_DATE, P11_CLS_KEY, P11_VAL_DATE },
-    { CKA_DERIVE, P11_CLS_KEY, P11_VAL_BOOL },
-    { CKA_SUBJECT, P11_CLS_PUBLIC | P11_CLS_PRIVATE, P11_VAL_BYTES },
-    { CKA_ENCRYPT, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_BOOL },
-    { CKA_VERIFY, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_BOOL },
-    { CKA_WRAP, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_BOOL },
-    { CKA_VERIFY_RECOVER, P11_CLS_PUBLIC, P11_VAL_BOOL },
-    { CKA_DECRYPT, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_BOOL },
-    { CKA_SIGN, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_BOOL },
-    { CKA_UNWRAP, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_BOOL },
-    { CKA_SIGN_RECOVER, P11_CLS_PRIVATE, P11_VAL_BOOL },
+    { CKA_LABEL, P11_CLS_ANY, P11_VAL_ANY },
+    { CKA_ID, P11_CLS_KEY, P11_VAL_ANY },
+    { CKA_START_DATE, P11_CLS_KEY, P11_VAL_ANY },
+    { CKA_END_DATE, P11_CLS_KEY, P11_VAL_ANY },
+    { CKA_DERIVE, P11_CLS_KEY, P11_VAL_ANY },
+    { CKA_SUBJECT, P11_CLS_PUBLIC | P11_CLS_PRIVATE, P11_VAL_ANY },
+    { CKA_ENCRYPT, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_ANY },
+    { CKA_VERIFY, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_ANY },
+    { CKA_WRAP, P11_CLS_SECRET | P11_CLS_PUBLIC, P11_VAL_ANY },
+    { CKA_VERIFY_RECOVER, P11_CLS_PUBLIC, P11_VAL_ANY },
+    { CKA_DECRYPT, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_ANY },
+    { CKA_SIGN, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_ANY },
+    { CKA_UNWRAP, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_ANY },
+    { CKA_SIGN_RECOVER, P11_CLS_PRIVATE, P11_VAL_ANY },
     { CKA_SENSITIVE, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_LATCH_TRUE },
     { CKA_WRAP_WITH_TRUSTED, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_LATCH_TRUE },
     { CKA_EXTRACTABLE, P11_CLS_SECRET | P11_CLS_PRIVATE, P11_VAL_LATCH_FALSE },
@@ -133,13 +133,34 @@ static CK_RV read_bool(
     return rv;
 }
 
+/* The rule-table bit of object class `cls`; P11_CLS_OTHER for a class this
+ * module does not store, which C_CreateObject refuses. */
+static unsigned class_bit(CK_OBJECT_CLASS cls)
+{
+    switch (cls)
+    {
+    case CKO_DATA:
+        return P11_CLS_DATA;
+    case CKO_CERTIFICATE:
+        return P11_CLS_CERT;
+    case CKO_SECRET_KEY:
+        return P11_CLS_SECRET;
+    case CKO_PUBLIC_KEY:
+        return P11_CLS_PUBLIC;
+    case CKO_PRIVATE_KEY:
+        return P11_CLS_PRIVATE;
+    default:
+        return P11_CLS_OTHER;
+    }
+}
+
 /*
  * Map CKA_CLASS to the rule-table bit. An object with no CKA_CLASS, or with one
- * that is not a CK_OBJECT_CLASS (C_CreateObject does not validate the class),
- * is still a valid target: it gets P11_CLS_OTHER, the most restrictive class
- * (only CKA_LABEL may change), and the read outcome that says so is not an
- * error of the call. Only a failure to read the object at all, such as
- * CKR_OBJECT_HANDLE_INVALID, is returned.
+ * that is not a CK_OBJECT_CLASS (the store holds what it is given, and a file
+ * store can be edited), is still a valid target: it gets P11_CLS_OTHER, the
+ * most restrictive class (only CKA_LABEL may change), and the read outcome
+ * that says so is not an error of the call. Only a failure to read the object
+ * at all, such as CKR_OBJECT_HANDLE_INVALID, is returned.
  */
 static CK_RV read_class(tsra_pkcs11_attr_reader read, void *ctx, unsigned *out)
 {
@@ -160,24 +181,37 @@ static CK_RV read_class(tsra_pkcs11_attr_reader read, void *ctx, unsigned *out)
     {
         return CKR_OK; /* too narrow: no usable class */
     }
-    switch (cls)
-    {
-    case CKO_DATA:
-        *out = P11_CLS_DATA;
-        break;
-    case CKO_SECRET_KEY:
-        *out = P11_CLS_SECRET;
-        break;
-    case CKO_PUBLIC_KEY:
-        *out = P11_CLS_PUBLIC;
-        break;
-    case CKO_PRIVATE_KEY:
-        *out = P11_CLS_PRIVATE;
-        break;
-    default:
-        break; /* a class this module stores no rules for */
-    }
+    *out = class_bit(cls);
     return CKR_OK;
+}
+
+/* The object-level gates of C_SetAttributeValue and C_DestroyObject, in this
+ * order: a token object needs a read/write session, and the object's `allow`
+ * flag (CKA_MODIFIABLE or CKA_DESTROYABLE; TRUE when absent) must be TRUE. */
+static CK_RV object_gate(
+    tsra_pkcs11_attr_reader read,
+    void *ctx,
+    CK_BBOOL rw_session,
+    CK_ATTRIBUTE_TYPE allow
+)
+{
+    CK_BBOOL token = CK_FALSE;
+    CK_RV rv = read_bool(read, ctx, CKA_TOKEN, CK_FALSE, CK_TRUE, &token);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    if (token && !rw_session)
+    {
+        return CKR_SESSION_READ_ONLY;
+    }
+    CK_BBOOL allowed = CK_TRUE;
+    rv = read_bool(read, ctx, allow, CK_TRUE, CK_FALSE, &allowed);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    return allowed ? CKR_OK : CKR_ACTION_PROHIBITED;
 }
 
 /* Whether the object carries `type` at all (a sensitive value counts). */
@@ -198,46 +232,6 @@ static CK_RV carries(tsra_pkcs11_attr_reader read, void *ctx, CK_ATTRIBUTE_TYPE 
     return rv;
 }
 
-/* Parse `n` ASCII digits; -1 if any is not a digit. */
-static int parse_digits(const CK_CHAR *p, size_t n)
-{
-    int v = 0;
-    for (size_t i = 0; i < n; i++)
-    {
-        if ((p[i] < '0') || (p[i] > '9'))
-        {
-            return -1;
-        }
-        v = (v * 10) + (p[i] - '0');
-    }
-    return v;
-}
-
-/*
- * An empty value (no date), or a CK_DATE whose fields are in the ranges
- * pkcs11t.h gives: year 1900-9999, month 01-12, day 01-31. The day is not
- * checked against the month; the spec defines only the ranges.
- */
-static CK_BBOOL date_ok(const CK_ATTRIBUTE *a)
-{
-    if (a->ulValueLen == 0)
-    {
-        return CK_TRUE;
-    }
-    if ((a->ulValueLen != sizeof(CK_DATE)) || (a->pValue == NULL))
-    {
-        return CK_FALSE;
-    }
-    CK_DATE d;
-    memcpy(&d, a->pValue, sizeof(d));
-    int year = parse_digits(d.year, sizeof(d.year));
-    int month = parse_digits(d.month, sizeof(d.month));
-    int day = parse_digits(d.day, sizeof(d.day));
-    return ((year >= 1900) && (month >= 1) && (month <= 12) && (day >= 1) && (day <= 31))
-               ? CK_TRUE
-               : CK_FALSE;
-}
-
 static CK_RV check_value(
     const attr_rule *r,
     const CK_ATTRIBUTE *a,
@@ -252,12 +246,8 @@ static CK_RV check_value(
     {
     case P11_VAL_FIXED:
         return CKR_ATTRIBUTE_READ_ONLY;
-    case P11_VAL_BYTES:
-        return CKR_OK;
-    case P11_VAL_DATE:
-        return date_ok(a) ? CKR_OK : CKR_ATTRIBUTE_VALUE_INVALID;
-    case P11_VAL_BOOL:
-        return tsra_pkcs11_tmpl_bool(a, &want);
+    case P11_VAL_ANY:
+        return CKR_OK; /* the shape is checked already */
     case P11_VAL_LATCH_TRUE:
         rv = tsra_pkcs11_tmpl_bool(a, &want);
         if (rv == CKR_OK)
@@ -294,30 +284,20 @@ CK_RV tsra_pkcs11_setattr_check(
     void *ctx
 )
 {
-    if ((read == NULL) || ((tmpl == NULL) && (count > 0)) || (count > SETATTR_MAX_TEMPLATE_ATTRS))
+    if (read == NULL)
     {
         return CKR_ARGUMENTS_BAD;
     }
+    CK_RV rv = tsra_pkcs11_tmpl_check_bounds(tmpl, count);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
     /* Read first even for an empty template: it is also what proves the handle. */
-    CK_BBOOL token = CK_FALSE;
-    CK_RV rv = read_bool(read, ctx, CKA_TOKEN, CK_FALSE, CK_TRUE, &token);
+    rv = object_gate(read, ctx, rw_session, CKA_MODIFIABLE);
     if (rv != CKR_OK)
     {
         return rv;
-    }
-    if (token && !rw_session)
-    {
-        return CKR_SESSION_READ_ONLY;
-    }
-    CK_BBOOL modifiable = CK_TRUE;
-    rv = read_bool(read, ctx, CKA_MODIFIABLE, CK_TRUE, CK_FALSE, &modifiable);
-    if (rv != CKR_OK)
-    {
-        return rv;
-    }
-    if (!modifiable)
-    {
-        return CKR_ACTION_PROHIBITED;
     }
     unsigned cls = P11_CLS_OTHER;
     rv = read_class(read, ctx, &cls);
@@ -329,9 +309,10 @@ CK_RV tsra_pkcs11_setattr_check(
     for (CK_ULONG i = 0; i < count; i++)
     {
         const CK_ATTRIBUTE *a = &tmpl[i];
-        if ((a->ulValueLen > 0) && (a->pValue == NULL))
+        rv = tsra_pkcs11_attr_check(a);
+        if (rv != CKR_OK)
         {
-            return CKR_ATTRIBUTE_VALUE_INVALID;
+            return rv;
         }
         if (tsra_pkcs11_tmpl_find(tmpl, i, a->type) != NULL)
         {
@@ -353,6 +334,90 @@ CK_RV tsra_pkcs11_setattr_check(
         {
             return rv;
         }
+    }
+    return CKR_OK;
+}
+
+CK_RV tsra_pkcs11_destroy_check(CK_BBOOL rw_session, tsra_pkcs11_attr_reader read, void *ctx)
+{
+    if (read == NULL)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+    return object_gate(read, ctx, rw_session, CKA_DESTROYABLE);
+}
+
+CK_RV tsra_pkcs11_create_check(
+    const CK_ATTRIBUTE *tmpl,
+    CK_ULONG count,
+    CK_BBOOL rw_session,
+    CK_BBOOL *token
+)
+{
+    if (token == NULL)
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+    *token = CK_FALSE;
+    CK_RV rv = tsra_pkcs11_tmpl_check_bounds(tmpl, count);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    CK_BBOOL have_class = CK_FALSE;
+    CK_BBOOL material = CK_FALSE;
+    CK_OBJECT_CLASS cls = 0;
+    for (CK_ULONG i = 0; i < count; i++)
+    {
+        const CK_ATTRIBUTE *a = &tmpl[i];
+        rv = tsra_pkcs11_attr_check(a);
+        if (rv != CKR_OK)
+        {
+            return rv;
+        }
+        /* Which of two values the object has would depend on who reads it. */
+        if (tsra_pkcs11_tmpl_find(tmpl, i, a->type) != NULL)
+        {
+            return CKR_TEMPLATE_INCONSISTENT;
+        }
+        if (tsra_pkcs11_attr_is_token_set(a))
+        {
+            return CKR_ATTRIBUTE_READ_ONLY;
+        }
+        if (a->type == CKA_CLASS)
+        {
+            memcpy(&cls, a->pValue, sizeof(cls)); /* shape checked, may be unaligned */
+            have_class = CK_TRUE;
+        }
+        else if (a->type == CKA_TOKEN)
+        {
+            *token = (*(const CK_BBOOL *)a->pValue != CK_FALSE) ? CK_TRUE : CK_FALSE;
+        }
+        else if (tsra_pkcs11_attr_is_key_material(a->type))
+        {
+            material = CK_TRUE;
+        }
+    }
+    if (*token && !rw_session)
+    {
+        return CKR_SESSION_READ_ONLY;
+    }
+    if (!have_class)
+    {
+        return CKR_TEMPLATE_INCOMPLETE;
+    }
+    if (class_bit(cls) == P11_CLS_OTHER)
+    {
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    CK_BBOOL secret = ((cls == CKO_SECRET_KEY) || (cls == CKO_PRIVATE_KEY)) ? CK_TRUE : CK_FALSE;
+    if ((secret || (cls == CKO_PUBLIC_KEY)) && material)
+    {
+        return CKR_TEMPLATE_INCONSISTENT;
+    }
+    if (secret)
+    {
+        return CKR_TEMPLATE_INCOMPLETE;
     }
     return CKR_OK;
 }

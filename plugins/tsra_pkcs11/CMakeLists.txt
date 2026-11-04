@@ -73,6 +73,7 @@ set(TSRA_PKCS11_SOURCES
     ./src/tsra_pkcs11_hsm.c
     ./src/tsra_pkcs11_key.c
     ./src/tsra_pkcs11_template.c
+    ./src/tsra_pkcs11_attr_types.c
     ./src/tsra_pkcs11_attr_policy.c
     ./src/tsra_pkcs11_crypt.c
     ./src/tsra_pkcs11_stubs.c

@@ -8,7 +8,8 @@
  * module load — the functions are linked directly:
  *
  *   gcc -I ../include/pkcs11-v3.1 -I ../src aes_template_test.c \
- *       ../src/tsra_pkcs11_template.c ../src/tsra_pkcs11_status.c \
+ *       ../src/tsra_pkcs11_template.c ../src/tsra_pkcs11_attr_types.c \
+ *       ../src/tsra_pkcs11_status.c \
  *       -o aes_template_test && ./aes_template_test
  *
  * Covers the complete CK_RV matrix of tsra_pkcs11_keygen_check_template
@@ -200,9 +201,9 @@ static void test_check_arguments(void)
     );
 
     /* Distinct vendor types keep the duplicate scan quiet, so the count alone
-     * decides. KEYGEN_MAX_TEMPLATE_ATTRS entries pass, one more is refused. */
+     * decides. TEMPLATE_MAX_ATTRS entries pass, one more is refused. */
     CK_BYTE byte = 0;
-    CK_ATTRIBUTE big[KEYGEN_MAX_TEMPLATE_ATTRS + 1];
+    CK_ATTRIBUTE big[TEMPLATE_MAX_ATTRS + 1];
     for (CK_ULONG i = 0; i < COUNT(big); i++)
     {
         big[i].type = CKA_VENDOR_DEFINED + i;
@@ -211,12 +212,12 @@ static void test_check_arguments(void)
     }
     big[0] = (CK_ATTRIBUTE)VALUE_LEN32;
     CHECK(
-        (check(big, KEYGEN_MAX_TEMPLATE_ATTRS, &len, NULL) == CKR_OK) && (len == AES256_KEY_BYTES),
-        "exactly KEYGEN_MAX_TEMPLATE_ATTRS distinct attributes -> CKR_OK"
+        (check(big, TEMPLATE_MAX_ATTRS, &len, NULL) == CKR_OK) && (len == AES256_KEY_BYTES),
+        "exactly TEMPLATE_MAX_ATTRS distinct attributes -> CKR_OK"
     );
     CHECK(
-        check(big, KEYGEN_MAX_TEMPLATE_ATTRS + 1, NULL, NULL) == CKR_ARGUMENTS_BAD,
-        "KEYGEN_MAX_TEMPLATE_ATTRS + 1 -> CKR_ARGUMENTS_BAD"
+        check(big, TEMPLATE_MAX_ATTRS + 1, NULL, NULL) == CKR_ARGUMENTS_BAD,
+        "TEMPLATE_MAX_ATTRS + 1 -> CKR_ARGUMENTS_BAD"
     );
     len = 99;
     token = CK_TRUE;
@@ -224,7 +225,7 @@ static void test_check_arguments(void)
         (tsra_pkcs11_keygen_check_template(
              CKM_AES_KEY_GEN,
              big,
-             KEYGEN_MAX_TEMPLATE_ATTRS + 1,
+             TEMPLATE_MAX_ATTRS + 1,
              &pol,
              &len,
              &token
@@ -518,6 +519,14 @@ static void test_check_reject(void)
         check_with((CK_ATTRIBUTE)ATTR(CKA_KEY_GEN_MECHANISM, kgm)) == CKR_ATTRIBUTE_READ_ONLY,
         "CKA_KEY_GEN_MECHANISM -> CKR_ATTRIBUTE_READ_ONLY (the token records it)"
     );
+    CHECK(
+        check_with((CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_true)) == CKR_ATTRIBUTE_READ_ONLY,
+        "CKA_TRUSTED=TRUE -> CKR_ATTRIBUTE_READ_ONLY (needs the Security Officer)"
+    );
+    CHECK(
+        check_with((CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK,
+        "CKA_TRUSTED=FALSE, the default -> CKR_OK"
+    );
 
     /* Key material cannot be supplied to a generator. */
     CK_BYTE material[AES256_KEY_BYTES] = { 0 };
@@ -528,6 +537,27 @@ static void test_check_reject(void)
     CHECK(
         check_with((CK_ATTRIBUTE){ CKA_VALUE, NULL, 0 }) == CKR_TEMPLATE_INCONSISTENT,
         "empty CKA_VALUE -> CKR_TEMPLATE_INCONSISTENT"
+    );
+    CHECK(
+        check_with((CK_ATTRIBUTE)ATTR(CKA_PRIME_1, material)) == CKR_TEMPLATE_INCONSISTENT,
+        "any key material (CKA_PRIME_1) -> CKR_TEMPLATE_INCONSISTENT"
+    );
+
+    /* Attribute arrays and the byte ceiling, from the shared type table. */
+    CK_ATTRIBUTE inner[] = { BOOL_ATTR(CKA_ENCRYPT, g_true) };
+    CHECK(
+        check_with((CK_ATTRIBUTE)ATTR(CKA_WRAP_TEMPLATE, inner)) == CKR_ATTRIBUTE_TYPE_INVALID,
+        "CKA_WRAP_TEMPLATE -> CKR_ATTRIBUTE_TYPE_INVALID"
+    );
+    CHECK(
+        check_with((CK_ATTRIBUTE){ CKA_LABEL, g_label, 0xFFFFFFFFUL }) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "a 0xFFFFFFFF label -> CKR_ATTRIBUTE_VALUE_INVALID, unread"
+    );
+    CK_BYTE v8[8] = { 1 };
+    CHECK(
+        check_with((CK_ATTRIBUTE)ATTR(CKA_MODIFIABLE, v8)) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "a CK_BBOOL keygen does not interpret, 8 bytes wide -> CKR_ATTRIBUTE_VALUE_INVALID"
     );
 
     /* NULL value with a non-zero length, for any type. */
@@ -629,7 +659,7 @@ static void test_build(void)
     }
     tsra_pkcs11_keygen_fill fill;
     memset(&fill, 0xA5, sizeof(fill)); /* every field must be written by the builder */
-    CK_ATTRIBUTE full[KEYGEN_MAX_TEMPLATE_ATTRS + KEYGEN_APPENDED_ATTRS];
+    CK_ATTRIBUTE full[TEMPLATE_MAX_ATTRS + KEYGEN_APPENDED_ATTRS];
     CK_ULONG n = 0;
 
     CHECK(
@@ -678,6 +708,7 @@ static void test_build(void)
         "default CKA_CLASS=CKO_SECRET_KEY"
     );
     CHECK(built_has(full, n, CKA_KEY_TYPE, &aes, sizeof(aes)), "default CKA_KEY_TYPE=CKK_AES");
+    CHECK(built_has(full, n, CKA_PRIVATE, &t, sizeof(t)), "default CKA_PRIVATE=TRUE");
     CK_MECHANISM_TYPE cbc_family[] = { CKM_AES_CBC, CKM_AES_CBC_PAD };
     CHECK(
         built_has(full, n, CKA_ALLOWED_MECHANISMS, cbc_family, sizeof(cbc_family)),
@@ -727,10 +758,11 @@ static void test_build(void)
     }
     CHECK(enc_count == 1, "exactly one CKA_ENCRYPT in the result");
 
-    /* All seven defaults supplied: only the always-appended four are added. */
+    /* All eight defaults supplied: only the always-appended four are added. */
     CK_MECHANISM_TYPE only_raw[] = { CKM_AES_CBC };
-    CK_ATTRIBUTE all7[] = { ATTR(CKA_CLASS, g_secret),
+    CK_ATTRIBUTE all8[] = { ATTR(CKA_CLASS, g_secret),
                             ATTR(CKA_KEY_TYPE, g_aes),
+                            BOOL_ATTR(CKA_PRIVATE, g_false),
                             ATTR(CKA_ALLOWED_MECHANISMS, only_raw),
                             BOOL_ATTR(CKA_SENSITIVE, g_true),
                             BOOL_ATTR(CKA_EXTRACTABLE, g_false),
@@ -738,8 +770,8 @@ static void test_build(void)
                             BOOL_ATTR(CKA_DECRYPT, g_true),
                             VALUE_LEN32 };
     CHECK(
-        (tsra_pkcs11_keygen_build_template(pol, all7, COUNT(all7), &fill, full, &n) == CKR_OK) &&
-            (n == COUNT(all7) + 4),
+        (tsra_pkcs11_keygen_build_template(pol, all8, COUNT(all8), &fill, full, &n) == CKR_OK) &&
+            (n == COUNT(all8) + 4),
         "all defaults given -> only LOCAL/ALWAYS_SENSITIVE/NEVER_EXTRACTABLE/KEY_GEN_MECHANISM "
         "appended"
     );
@@ -747,6 +779,7 @@ static void test_build(void)
         built_has(full, n, CKA_ALLOWED_MECHANISMS, only_raw, sizeof(only_raw)),
         "the caller's narrower CKA_ALLOWED_MECHANISMS is stored, not the family"
     );
+    CHECK(built_has(full, n, CKA_PRIVATE, &f, sizeof(f)), "the caller's CKA_PRIVATE=FALSE is kept");
     CHECK(
         (full[n - 4].type == CKA_LOCAL) && (full[n - 3].type == CKA_ALWAYS_SENSITIVE) &&
             (full[n - 2].type == CKA_NEVER_EXTRACTABLE) &&
@@ -1035,7 +1068,7 @@ static void test_families(void)
 
     /* What each family stores. */
     tsra_pkcs11_keygen_fill fill;
-    CK_ATTRIBUTE full[KEYGEN_MAX_TEMPLATE_ATTRS + KEYGEN_APPENDED_ATTRS];
+    CK_ATTRIBUTE full[TEMPLATE_MAX_ATTRS + KEYGEN_APPENDED_ATTRS];
     CK_ULONG n = 0;
     const tsra_pkcs11_keygen_policy *gcm_pol = policy_for(CKM_AES_KEY_GEN, t_gcm, 2);
     CHECK(

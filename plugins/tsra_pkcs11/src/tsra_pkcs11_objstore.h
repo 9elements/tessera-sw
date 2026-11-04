@@ -32,14 +32,14 @@ extern "C"
 typedef struct tsra_pkcs11_objstore_ops tsra_pkcs11_objstore_ops;
 
 /*
- * Reads one attribute of the object a set_attr check is deciding on, with
- * get_attr semantics for a single-entry template.
+ * Reads one attribute of the object a set_attr or destroy check is deciding
+ * on, with get_attr semantics for a single-entry template.
  */
 typedef CK_RV (*tsra_pkcs11_objstore_reader)(void *rctx, CK_ATTRIBUTE *a);
 
 /*
- * Decides whether a set_attr may go ahead, from the object as `read` sees it;
- * anything but CKR_OK refuses the whole template. The backend runs it after it
+ * Decides whether a set_attr or destroy may go ahead, from the object as `read`
+ * sees it; anything but CKR_OK refuses the call. The backend runs it after it
  * has locked and loaded the object and before it writes, so the decision and
  * the write see the same state even when another process shares the store.
  */
@@ -80,7 +80,15 @@ struct tsra_pkcs11_objstore_ops
      const CK_ATTRIBUTE *tmpl,
      CK_ULONG count,
      CK_OBJECT_HANDLE *out);
-    CK_RV (*destroy)(void *ctx, CK_SLOT_ID slot, CK_BBOOL user_logged_in, CK_OBJECT_HANDLE h);
+    /* `check` (may be NULL) runs first, under the same lock as the removal;
+     * its refusal is returned and the object stays. */
+    CK_RV(*destroy)
+    (void *ctx,
+     CK_SLOT_ID slot,
+     CK_BBOOL user_logged_in,
+     CK_OBJECT_HANDLE h,
+     tsra_pkcs11_objstore_check check,
+     void *cctx);
     CK_RV(*get_attr)
     (void *ctx,
      CK_SLOT_ID slot,

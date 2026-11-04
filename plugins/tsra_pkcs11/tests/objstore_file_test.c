@@ -169,7 +169,7 @@ static int body_equals(
 }
 
 /*
- * A set_attr check standing in for the attribute policy's latch rule: refuse
+ * A check standing in for the attribute policy's latch rule: refuse
  * to move CKA_SENSITIVE from TRUE back to FALSE, judged on what `read` sees.
  * It also records whether the store's cross-process lock was held while it
  * ran, by trying to take that lock through a fresh descriptor.
@@ -562,7 +562,8 @@ int main(void)
         "empty slot: set_key_body -> OBJECT_HANDLE_INVALID"
     );
     CHECK(
-        s.ops->destroy(s.ctx, EMPTY_SLOT, CK_TRUE, sz_tok) == CKR_OBJECT_HANDLE_INVALID &&
+        s.ops->destroy(s.ctx, EMPTY_SLOT, CK_TRUE, sz_tok, NULL, NULL) ==
+                CKR_OBJECT_HANDLE_INVALID &&
             s.ops->get_size(s.ctx, SLOT, CK_FALSE, sz_tok, &sz_t) == CKR_OK,
         "empty slot: destroy -> OBJECT_HANDLE_INVALID, and the real object survives"
     );
@@ -600,8 +601,8 @@ int main(void)
             llen == 9,
         "session set_attr refusing a later entry leaves the earlier one unapplied"
     );
-    s.ops->destroy(s.ctx, SLOT, CK_FALSE, sz_tok);
-    s.ops->destroy(s.ctx, SLOT, CK_FALSE, sz_sess);
+    s.ops->destroy(s.ctx, SLOT, CK_FALSE, sz_tok, NULL, NULL);
+    s.ops->destroy(s.ctx, SLOT, CK_FALSE, sz_sess, NULL, NULL);
 
     /* v1 refusal via set_attr: making an object that carries CKA_VALUE private. */
     CK_ATTRIBUTE mkpriv[] = { { CKA_PRIVATE, &ck_true, sizeof(CK_BBOOL) } };
@@ -616,7 +617,7 @@ int main(void)
     );
 
     CHECK(
-        s.ops->destroy(s.ctx, SLOT, CK_FALSE, x) == CKR_OK,
+        s.ops->destroy(s.ctx, SLOT, CK_FALSE, x, NULL, NULL) == CKR_OK,
         "cleanup: destroy the scratch object"
     );
 
@@ -692,13 +693,29 @@ int main(void)
             refusals == 0,
         "unknown handles are reported before any check runs"
     );
-    s.ops->destroy(s.ctx, SLOT, CK_FALSE, lt);
+    probe.calls = 0;
+    probe.lock_held = 0;
+    CHECK(
+        s.ops->destroy(s.ctx, SLOT, CK_FALSE, lt, latch_check, &probe) == CKR_ATTRIBUTE_READ_ONLY &&
+            probe.calls == 1 && probe.lock_held,
+        "destroy: the check ran once, under the store lock"
+    );
+    refusals = 0;
+    CHECK(
+        s.ops->destroy(s.ctx, SLOT, CK_FALSE, sess, refuse_check, &refusals) ==
+                CKR_ACTION_PROHIBITED &&
+            refusals == 1 &&
+            read_label(&s, SLOT, CK_FALSE, lt, lbuf, sizeof(lbuf), &llen) == CKR_OK &&
+            read_label(&s, SLOT, CK_FALSE, sess, lbuf, sizeof(lbuf), &llen) == CKR_OK,
+        "a refusing destroy check keeps token and session objects"
+    );
+    s.ops->destroy(s.ctx, SLOT, CK_FALSE, lt, NULL, NULL);
     s2.ops->teardown(s2.ctx);
 
     /* --- counter-first no reuse: destroy then create gets a higher number --- */
     CK_OBJECT_HANDLE a = 0, b = 0;
     make_object(&s, SLOT, CK_FALSE, CK_TRUE, CK_FALSE, "a", NULL, 0, CK_FALSE, &a);
-    CHECK(s.ops->destroy(s.ctx, SLOT, CK_FALSE, a) == CKR_OK, "destroy a token object");
+    CHECK(s.ops->destroy(s.ctx, SLOT, CK_FALSE, a, NULL, NULL) == CKR_OK, "destroy a token object");
     CHECK(
         read_label(&s, SLOT, CK_FALSE, a, lbuf, sizeof(lbuf), &llen) == CKR_OBJECT_HANDLE_INVALID,
         "destroyed object is gone (INVALID)"
@@ -752,7 +769,7 @@ int main(void)
             llen == 4,
         "meta: nothing was written, the surviving object is intact"
     );
-    s.ops->destroy(s.ctx, META_SLOT, CK_FALSE, keep);
+    s.ops->destroy(s.ctx, META_SLOT, CK_FALSE, keep, NULL, NULL);
 
     CK_OBJECT_HANDLE last = b; /* highest handle so far */
     s.ops->teardown(s.ctx);

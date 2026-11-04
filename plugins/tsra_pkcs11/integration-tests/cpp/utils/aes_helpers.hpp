@@ -15,7 +15,8 @@
 constexpr CK_ULONG kAesBlock = 16;
 
 /// Generate an AES key of `bytes` with the given usage; returns the
-/// C_GenerateKey result and the handle via *out.
+/// C_GenerateKey result and the handle via *out. Like the other helpers here
+/// it makes a public key (CKA_PRIVATE defaults to TRUE for keys).
 inline CK_RV gen_aes_key(
     CK_SESSION_HANDLE s,
     CK_ULONG bytes,
@@ -26,6 +27,7 @@ inline CK_RV gen_aes_key(
 )
 {
     CK_MECHANISM mech = { CKM_AES_KEY_GEN, nullptr, 0 };
+    CK_BBOOL no = CK_FALSE;
     CK_OBJECT_CLASS cls = CKO_SECRET_KEY;
     CK_KEY_TYPE kt = CKK_AES;
     CK_ATTRIBUTE tmpl[] = {
@@ -34,6 +36,7 @@ inline CK_RV gen_aes_key(
         { CKA_VALUE_LEN, &bytes, sizeof(bytes) },
         { CKA_ENCRYPT, &enc, sizeof(enc) },
         { CKA_DECRYPT, &dec, sizeof(dec) },
+        { CKA_PRIVATE, &no, sizeof(no) },
         { CKA_LABEL, const_cast<char *>(label), static_cast<CK_ULONG>(std::strlen(label)) },
     };
     return p11()->C_GenerateKey(s, &mech, tmpl, sizeof(tmpl) / sizeof(tmpl[0]), out);
@@ -44,11 +47,13 @@ inline CK_RV gen_aes_key(
 inline CK_RV gen_gcm_key(CK_SESSION_HANDLE s, const char *label, CK_OBJECT_HANDLE *out)
 {
     CK_MECHANISM mech = { CKM_AES_KEY_GEN, nullptr, 0 };
+    CK_BBOOL no = CK_FALSE;
     CK_ULONG bytes = 32;
     CK_MECHANISM_TYPE allowed[] = { CKM_AES_GCM };
     CK_ATTRIBUTE tmpl[] = {
         { CKA_VALUE_LEN, &bytes, sizeof(bytes) },
         { CKA_ALLOWED_MECHANISMS, allowed, sizeof(allowed) },
+        { CKA_PRIVATE, &no, sizeof(no) },
         { CKA_LABEL, const_cast<char *>(label), static_cast<CK_ULONG>(std::strlen(label)) },
     };
     return p11()->C_GenerateKey(s, &mech, tmpl, sizeof(tmpl) / sizeof(tmpl[0]), out);
@@ -58,11 +63,13 @@ inline CK_RV gen_gcm_key(CK_SESSION_HANDLE s, const char *label, CK_OBJECT_HANDL
 inline CK_RV gen_xts_key(CK_SESSION_HANDLE s, const char *label, CK_OBJECT_HANDLE *out)
 {
     CK_MECHANISM mech = { CKM_AES_XTS_KEY_GEN, nullptr, 0 };
+    CK_BBOOL no = CK_FALSE;
     CK_ULONG bytes = 64;
     CK_KEY_TYPE kt = CKK_AES_XTS;
     CK_ATTRIBUTE tmpl[] = {
         { CKA_KEY_TYPE, &kt, sizeof(kt) },
         { CKA_VALUE_LEN, &bytes, sizeof(bytes) },
+        { CKA_PRIVATE, &no, sizeof(no) },
         { CKA_LABEL, const_cast<char *>(label), static_cast<CK_ULONG>(std::strlen(label)) },
     };
     return p11()->C_GenerateKey(s, &mech, tmpl, sizeof(tmpl) / sizeof(tmpl[0]), out);

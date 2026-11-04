@@ -201,8 +201,8 @@ int main(void)
     size_t big = P11_STORE_MAX_FILE_SIZE + 1;
     unsigned char *bigbuf = (unsigned char *)calloc(1, big);
     CHECK(
-        bigbuf != NULL && tsra_pkcs11_store_write(store, "big", bigbuf, big) == CKR_DATA_LEN_RANGE,
-        "oversize write rejected"
+        bigbuf != NULL && tsra_pkcs11_store_write(store, "big", bigbuf, big) == CKR_DEVICE_MEMORY,
+        "oversize write rejected (CKR_DEVICE_MEMORY)"
     );
     free(bigbuf);
     CHECK(

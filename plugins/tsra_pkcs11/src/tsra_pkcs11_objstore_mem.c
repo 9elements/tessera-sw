@@ -14,6 +14,7 @@
  * layer holds the module lock across every call.
  */
 
+#include "tsra_pkcs11_attr_types.h"
 #include "tsra_pkcs11_objstore.h"
 #include "tsra_pkcs11_wipe.h"
 
@@ -199,42 +200,30 @@ static CK_RV mem_create(
     return CKR_OK;
 }
 
-static CK_RV mem_destroy(void *ctx, CK_SLOT_ID slot, CK_BBOOL user_logged_in, CK_OBJECT_HANDLE h)
-{
-    mem_store *st = (mem_store *)ctx;
-    mem_object *o = lookup(st, h);
-    if (o == NULL || !visible(o, slot, user_logged_in))
-    {
-        return CKR_OBJECT_HANDLE_INVALID;
-    }
-    free_object(o);
-    return CKR_OK;
-}
-
-/* Per-attribute outcomes follow PKCS#11 §5.7.5: missing type, sensitive value,
- * two-call sizing, and too-small buffer each set ulValueLen and the return
- * value as the spec's cases prescribe. */
+/* Per-attribute outcomes follow PKCS#11 §5.7.5, in its order: sensitive value,
+ * missing type, two-call sizing, and too-small buffer each set ulValueLen and
+ * the return value as the spec's cases prescribe. */
 static CK_RV read_attrs(const mem_object *o, CK_ATTRIBUTE *tmpl, CK_ULONG count)
 {
-    /* Sensitive or non-extractable secret material must not be revealed. */
+    /* The key material of a sensitive or unextractable object is never
+     * revealed, held here or not: a generated key's lives only on the device. */
     CK_BBOOL sensitive =
         attr_bool(o, CKA_SENSITIVE, CK_FALSE) || !attr_bool(o, CKA_EXTRACTABLE, CK_TRUE);
 
     CK_RV rv = CKR_OK;
     for (CK_ULONG i = 0; i < count; i++)
     {
+        if (sensitive && tsra_pkcs11_attr_is_key_material(tmpl[i].type))
+        {
+            tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            rv = CKR_ATTRIBUTE_SENSITIVE;
+            continue;
+        }
         const mem_attr *a = find_attr(o, tmpl[i].type);
         if (a == NULL)
         {
             tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
             rv = CKR_ATTRIBUTE_TYPE_INVALID;
-            continue;
-        }
-        CK_BBOOL secret = (tmpl[i].type == CKA_VALUE || tmpl[i].type == CKA_PRIVATE_EXPONENT);
-        if (sensitive && secret)
-        {
-            tmpl[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-            rv = CKR_ATTRIBUTE_SENSITIVE;
             continue;
         }
         if (tmpl[i].pValue == NULL_PTR)
@@ -275,10 +264,33 @@ static CK_RV mem_get_attr(
     return read_attrs(o, tmpl, count);
 }
 
-/* The tsra_pkcs11_objstore_reader a set_attr check sees the object through. */
+/* The tsra_pkcs11_objstore_reader a check sees the object through. */
 static CK_RV read_one(void *rctx, CK_ATTRIBUTE *a)
 {
     return read_attrs((const mem_object *)rctx, a, 1);
+}
+
+static CK_RV mem_destroy(
+    void *ctx,
+    CK_SLOT_ID slot,
+    CK_BBOOL user_logged_in,
+    CK_OBJECT_HANDLE h,
+    tsra_pkcs11_objstore_check check,
+    void *cctx
+)
+{
+    mem_store *st = (mem_store *)ctx;
+    mem_object *o = lookup(st, h);
+    if (o == NULL || !visible(o, slot, user_logged_in))
+    {
+        return CKR_OBJECT_HANDLE_INVALID;
+    }
+    CK_RV rv = (check != NULL) ? check(cctx, read_one, o) : CKR_OK;
+    if (rv == CKR_OK)
+    {
+        free_object(o);
+    }
+    return rv;
 }
 
 /* All-or-nothing, like the file backend's read-modify-rewrite: every value and

@@ -29,10 +29,28 @@ the spec requires). Implemented so far:
 - **Host objects** — `C_CreateObject` / `C_DestroyObject` / `C_GetAttributeValue`
   / `C_SetAttributeValue` / `C_GetObjectSize` / `C_FindObjects*` against the
   host object store: in memory, or token objects in files with
-  `TSRA_PKCS11_PERSIST` (see Configuration). `C_SetAttributeValue` changes
-  only the attributes PKCS#11 marks modifiable for the object's class (label,
-  ID, dates, usage flags), and applies a template all-or-nothing; on keys
-  `CKA_SENSITIVE` can only become TRUE and `CKA_EXTRACTABLE` only FALSE.
+  `TSRA_PKCS11_PERSIST` (see Configuration). Every template is checked
+  against one attribute type table before anything is stored or matched: a
+  `CK_BBOOL`, `CK_ULONG` or `CK_DATE` value of the wrong size or content is
+  `CKR_ATTRIBUTE_VALUE_INVALID`, and no value is read at a wrong length. A
+  template takes at most 64 attributes (`CKR_ARGUMENTS_BAD`, also for
+  `C_GetAttributeValue`) and 1 MiB of values (`CKR_ATTRIBUTE_VALUE_INVALID`).
+  The file store keeps a token object in a record of at most 256 KiB,
+  attribute values and masked key body included; a larger one is
+  `CKR_DEVICE_MEMORY`. `C_CreateObject` needs `CKA_CLASS`
+  (`CKR_TEMPLATE_INCOMPLETE`) naming a data object, a certificate or a key
+  (any other class is `CKR_ATTRIBUTE_VALUE_INVALID`), creates no secret or
+  private key (see Deviations), and refuses the attributes only the token
+  sets (`CKA_LOCAL`, `CKA_ALWAYS_SENSITIVE`, `CKA_NEVER_EXTRACTABLE`,
+  `CKA_KEY_GEN_MECHANISM`, `CKA_UNIQUE_ID`, and `CKA_TRUSTED` TRUE, which is
+  the Security Officer's: `CKR_ATTRIBUTE_READ_ONLY`).
+  `CKA_VALUE` of a sensitive key answers `CKR_ATTRIBUTE_SENSITIVE`.
+  `C_SetAttributeValue` changes only the attributes PKCS#11 marks modifiable
+  for the object's class (label, ID, dates, usage flags), and applies a
+  template all-or-nothing; on keys `CKA_SENSITIVE` can only become TRUE and
+  `CKA_EXTRACTABLE` only FALSE. `C_DestroyObject` needs a read/write session
+  for a token object (`CKR_SESSION_READ_ONLY`) and refuses an object with
+  `CKA_DESTROYABLE` FALSE (`CKR_ACTION_PROHIBITED`).
   `C_GetObjectSize` reports the bytes of the attribute values plus the masked
   key body. `C_CopyObject` is not implemented.
   A session object is destroyed when the session that created it closes, a
@@ -57,7 +75,8 @@ the spec requires). Implemented so far:
   list (`{ CKM_AES_CBC }`) is kept and enforced. Generated keys are always
   sensitive, unextractable and local — a template asking otherwise is rejected
   (note: OpenSC `pkcs11-tool --keygen` needs its `--sensitive` flag for this
-  reason).
+  reason). A key is private (`CKA_PRIVATE` TRUE, visible only while logged in)
+  unless the template sets `CKA_PRIVATE` to FALSE.
 - **`C_Encrypt` / `C_Decrypt` one-shot (`CKM_AES_CBC`, `CKM_AES_CBC_PAD`,
   `CKM_AES_GCM`, `CKM_AES_XTS`)** — each `C_EncryptInit`/`C_DecryptInit`
   unmasks the stored blob into a fresh device key that lives exactly as long
@@ -120,6 +139,16 @@ the spec requires). Implemented so far:
   IV in `CK_GCM_PARAMS`, and neither the module nor the device checks that an
   IV is never reused with the same key. The message-based API, in which a
   token can generate the IVs, is not implemented.
+- **No plaintext key import.** Keys enter the token only by generation (and
+  later by unwrap); the device holds them only masked. `C_CreateObject` with
+  a secret, private or public key that carries key material (`CKA_VALUE`,
+  `CKA_PRIVATE_EXPONENT`, `CKA_PRIME_1`, `CKA_PRIME_2`, `CKA_EXPONENT_1`,
+  `CKA_EXPONENT_2`, `CKA_COEFFICIENT`) returns `CKR_TEMPLATE_INCONSISTENT`, and
+  a secret or private key without it `CKR_TEMPLATE_INCOMPLETE`. Tools that
+  import plaintext keys, such as OpenSC `pkcs11-tool --write-object --type
+  secrkey` or `privkey`, get this error.
+- **No attribute arrays.** `CKA_WRAP_TEMPLATE`, `CKA_UNWRAP_TEMPLATE` and
+  `CKA_DERIVE_TEMPLATE` return `CKR_ATTRIBUTE_TYPE_INVALID` in every template.
 - **XTS tweaks are 64-bit.** The tweak, read as a little-endian 128-bit
   integer, must be below 2^64 - 1: its upper 8 bytes zero and its lower 8 not
   all 0xFF, so the device can advance it past the data unit. Any other tweak
@@ -179,7 +208,7 @@ What a token key survives:
 | Host crypto | `tsra_pkcs11_digest.c` | self-contained SHA-1/256/384/512 (PKCS#11 digests must work in public sessions; the SDK digest needs a login) |
 | Object store | `tsra_pkcs11_objstore.h`, `tsra_pkcs11_objstore_mem.c` | host-side objects behind a vtable seam; the in-memory backend |
 | File store | `tsra_pkcs11_objstore_file.c`, `tsra_pkcs11_store_record.c`, `tsra_pkcs11_store_io.c` | the persistent backend for token objects (session objects stay in memory): one record file per object, the record codec, and the crash-safe, owner-only filesystem primitives with a cross-process lock |
-| Object policy | `tsra_pkcs11_attr_policy.c` | which attributes `C_SetAttributeValue` may change, per class; a device-free unit of its own |
+| Object policy | `tsra_pkcs11_attr_types.c`, `tsra_pkcs11_attr_policy.c` | the attribute type table and template ceilings every template entry point uses; what `C_CreateObject` may create and which attributes `C_SetAttributeValue` may change, per class; device-free units of their own |
 | Key operations | `tsra_pkcs11_crypt.c`, `tsra_pkcs11_template.c` | key-backed entry points: operation state and the masked-blob store/unmask flow (CK_RV only); the keygen template validation, key-family choice and cipher mechanism policy are a device-free unit of their own |
 | Configuration | `tsra_pkcs11_config.c` | the configuration file and environment, the PIN rules and the owner backup key file; a device-free unit of its own |
 | HSM binding | `tsra_pkcs11_hsm.c`, `tsra_pkcs11_key.c`, `tsra_pkcs11_status.c` | the only code that calls `tsra_*` and maps `tsra_status` to `CK_RV` |
@@ -293,9 +322,11 @@ complete CK_RV matrix of the keygen template validation and defaults, the
 key-family choice and cipher mechanism policy, CK_GCM_PARAMS decoding, the
 GCM/XTS output-length plan and the status maps; built with UBSan, so the
 misaligned templates and parameter blocks it feeds the decoders are real
-checks), `tests/attr_policy_test.c` (every `C_SetAttributeValue` verdict,
-per object class), `tests/mech_table_test.c` (the mechanism table against
-the dispatch arms, in both directions), `tests/config_test.c` (the
+checks), `tests/attr_types_test.c` (the attribute type table and ceilings:
+every `CK_BBOOL` and `CK_ULONG` attribute at the lengths callers get wrong),
+`tests/attr_policy_test.c` (every `C_CreateObject` and `C_SetAttributeValue`
+verdict, per object class), `tests/mech_table_test.c` (the mechanism table
+against the dispatch arms, in both directions), `tests/config_test.c` (the
 environment configuration, the PIN rules and the owner backup key, built as a
 hardware build) and `tests/config_file_test.c` (the configuration file
 parser). `integration-tests/cpp/` is the functional suite
@@ -303,12 +334,13 @@ parser). `integration-tests/cpp/` is the functional suite
 module and drives the real Cryptoki ABI: keygen including the GCM/XTS key
 families, one-shot CBC, GCM and XTS round trips, the two-call sizing
 discipline, the operation state machine and init precedence, an init path
-for every advertised mechanism, attribute changes and object sizes, key
-survival across every event that ends the device session, what `C_Logout`
-does to session objects, the configuration at `C_Initialize`, the interface
-list, and the login rules (each login case in a process of its own, because
-the first login of a process provisions the mock partition with its PIN). So
-it needs the mock- or hardware-backed build (see the CMakeLists.txt header for
+for every advertised mechanism, attribute changes and object sizes, the
+object policy and attribute typing, key survival across every event that ends
+the device session, what `C_Logout` does to session objects, the
+configuration at `C_Initialize`, the interface list, and the login rules (each
+login case in a process of its own, because the first login of a process
+provisions the mock partition with its PIN). So it needs the mock- or
+hardware-backed build (see the CMakeLists.txt header for
 the build/run recipe; `TSRA_PKCS11_MODULE` points it at a module,
 `TSRA_PKCS11_TEST_PIN` overrides the simulator PIN). `tests/pkcs11test/` is
 the conformance gate: it builds Google's PKCS#11 conformance program at a
@@ -318,7 +350,8 @@ behaviour is kept from regressing as pieces land (the list grows with them;
 see the README there). The CI workflow
 (`.github/workflows/pkcs11.yml`) runs all of these on pushes/PRs to the
 staging branch: the unit harnesses under UBSan and under ASan
-(`tests/build_units.sh`), and the functional suite on the memory store, on the
-file store (`TSRA_PKCS11_PERSIST=1`) and against an ASan build of the module.
+(`tests/build_units.sh`), the functional suite on the memory store, on the
+file store (`TSRA_PKCS11_PERSIST=1`) and against an ASan build of the module,
+and 60 s of libFuzzer over the template decoders (`tests/template_fuzz.c`).
 `tests/HARDWARE.md` lists what only a device can show, and how to run the same
 suites on one.

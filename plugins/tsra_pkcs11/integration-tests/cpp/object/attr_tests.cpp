@@ -286,8 +286,8 @@ TEST_F(object_attrs_key, key_size_counts_the_masked_body)
     CK_ULONG size = 0;
     ASSERT_CKR_OK(p11()->C_GetObjectSize(s_, key, &size));
     // What C_GenerateKey stores besides the masked blob: class, key type and
-    // value length, seven CK_BBOOL usage/protection flags, and the label.
+    // value length, eight CK_BBOOL usage/protection flags, and the label.
     constexpr CK_ULONG kAttrBytes = sizeof(CK_OBJECT_CLASS) + sizeof(CK_KEY_TYPE) +
-                                    sizeof(CK_ULONG) + 7 * sizeof(CK_BBOOL) + (sizeof("sz") - 1);
+                                    sizeof(CK_ULONG) + 8 * sizeof(CK_BBOOL) + (sizeof("sz") - 1);
     EXPECT_GT(size, kAttrBytes);
 }

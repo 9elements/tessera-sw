@@ -56,7 +56,8 @@ CK_RV tsra_pkcs11_store_path_join(char *out, size_t outlen, const char *dir, con
  * directory. A crash leaves either the previous content or the new content,
  * never a partial file. A failed directory fsync is reported, although the new
  * content may already be visible. CKR_ARGUMENTS_BAD for NULL `data` or a zero
- * `len`: the store never writes an empty file.
+ * `len`: the store never writes an empty file. CKR_DEVICE_MEMORY for more than
+ * P11_STORE_MAX_FILE_SIZE bytes.
  */
 CK_RV tsra_pkcs11_store_write(
     const char *dir,

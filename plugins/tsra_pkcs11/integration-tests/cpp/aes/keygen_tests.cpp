@@ -25,6 +25,7 @@ namespace
 
 CK_BBOOL g_true = CK_TRUE;
 CK_BBOOL g_false = CK_FALSE;
+CK_OBJECT_CLASS g_data = CKO_DATA;
 CK_ULONG g_len32 = 32;
 CK_MECHANISM g_keygen = { CKM_AES_KEY_GEN, nullptr, 0 };
 CK_ULONG g_len64 = 64;
@@ -199,7 +200,7 @@ TEST_F(aes_keygen, rejects_oversized_template)
     // One over the ceiling, made of distinct vendor attributes so nothing
     // else in the template is wrong.
     CK_BYTE byte = 0;
-    std::vector<CK_ATTRIBUTE> tmpl(KEYGEN_MAX_TEMPLATE_ATTRS + 1);
+    std::vector<CK_ATTRIBUTE> tmpl(TEMPLATE_MAX_ATTRS + 1);
     for (size_t i = 0; i < tmpl.size(); i++)
     {
         tmpl[i] = { CKA_VENDOR_DEFINED + static_cast<CK_ATTRIBUTE_TYPE>(i), &byte, sizeof(byte) };
@@ -211,8 +212,7 @@ TEST_F(aes_keygen, rejects_oversized_template)
         p11()->C_GenerateKey(s_, &g_keygen, tmpl.data(), static_cast<CK_ULONG>(tmpl.size()), &key)
     );
     // Exactly the ceiling is fine.
-    EXPECT_CKR_OK(p11()->C_GenerateKey(s_, &g_keygen, tmpl.data(), KEYGEN_MAX_TEMPLATE_ATTRS, &key)
-    );
+    EXPECT_CKR_OK(p11()->C_GenerateKey(s_, &g_keygen, tmpl.data(), TEMPLATE_MAX_ATTRS, &key));
 }
 
 TEST_F(aes_keygen, token_object_needs_a_read_write_session)
@@ -291,14 +291,14 @@ TEST_F(aes_keygen, caller_usage_flags_are_stored_verbatim)
 
 TEST_F(aes_keygen, key_material_is_never_readable)
 {
-    // A generated key has no CKA_VALUE host-side (only the masked blob), so
-    // the store reports the attribute as absent; either way nothing leaks.
+    // A generated key has no CKA_VALUE host-side (only the masked blob), and a
+    // sensitive key answers as the spec says it must for its value.
     CK_OBJECT_HANDLE key = 0;
     ASSERT_CKR_OK(gen_aes_key(s_, 32, CK_TRUE, CK_TRUE, "secret", &key));
     CK_BYTE raw[64];
     std::memset(raw, 0xEE, sizeof(raw));
     CK_ATTRIBUTE value = { CKA_VALUE, raw, sizeof(raw) };
-    EXPECT_CKR(CKR_ATTRIBUTE_TYPE_INVALID, p11()->C_GetAttributeValue(s_, key, &value, 1));
+    EXPECT_CKR(CKR_ATTRIBUTE_SENSITIVE, p11()->C_GetAttributeValue(s_, key, &value, 1));
     EXPECT_EQ(CK_UNAVAILABLE_INFORMATION, value.ulValueLen);
     EXPECT_EQ(0xEE, raw[0]) << "the buffer must not have been written";
 }
@@ -359,9 +359,10 @@ TEST_F(aes_keygen, data_object_dies_with_its_session_too)
         p11()->C_OpenSession(kSlot, CKF_SERIAL_SESSION | CKF_RW_SESSION, nullptr, nullptr, &other)
     );
     CK_BYTE payload[4] = { 1, 2, 3, 4 };
-    CK_ATTRIBUTE tmpl[] = { { CKA_VALUE, payload, sizeof(payload) } };
+    CK_ATTRIBUTE tmpl[] = { { CKA_CLASS, &g_data, sizeof(g_data) },
+                            { CKA_VALUE, payload, sizeof(payload) } };
     CK_OBJECT_HANDLE obj = 0;
-    ASSERT_CKR_OK(p11()->C_CreateObject(other, tmpl, 1, &obj));
+    ASSERT_CKR_OK(p11()->C_CreateObject(other, tmpl, 2, &obj));
     ASSERT_CKR_OK(p11()->C_CloseSession(other));
     CK_BYTE back[4];
     CK_ATTRIBUTE read = { CKA_VALUE, back, sizeof(back) };
@@ -424,7 +425,7 @@ TEST_F(aes_keygen, close_all_sessions_destroys_session_objects)
     CK_SESSION_INFO info{};
     ASSERT_CKR_OK(p11()->C_GetSessionInfo(fresh, &info));
     EXPECT_EQ(static_cast<CK_STATE>(CKS_RW_PUBLIC_SESSION), info.state) << "the login went too";
-    // The key is public (gen_aes_key sets no CKA_PRIVATE), so this verdict is
+    // The key is public (gen_aes_key sets CKA_PRIVATE=FALSE), so this verdict is
     // "destroyed", not "hidden by the login gate".
     CK_ULONG vlen = 0;
     EXPECT_CKR(CKR_OBJECT_HANDLE_INVALID, get_attr(fresh, key, CKA_VALUE_LEN, &vlen));
@@ -438,10 +439,11 @@ TEST_F(aes_keygen, create_object_validates_cka_token)
     // (the backends read the raw bytes more loosely).
     CK_BYTE payload[4] = { 1, 2, 3, 4 };
     CK_ULONG wide_true = 1;
-    CK_ATTRIBUTE bad[] = { { CKA_VALUE, payload, sizeof(payload) },
+    CK_ATTRIBUTE bad[] = { { CKA_CLASS, &g_data, sizeof(g_data) },
+                           { CKA_VALUE, payload, sizeof(payload) },
                            { CKA_TOKEN, &wide_true, sizeof(wide_true) } };
     CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
-    EXPECT_CKR(CKR_ATTRIBUTE_VALUE_INVALID, p11()->C_CreateObject(s_, bad, 2, &obj));
+    EXPECT_CKR(CKR_ATTRIBUTE_VALUE_INVALID, p11()->C_CreateObject(s_, bad, 3, &obj));
     EXPECT_EQ(CK_INVALID_HANDLE, obj) << "nothing was created";
 }
 
@@ -450,14 +452,16 @@ TEST_F(aes_keygen, create_object_refuses_a_token_object_on_a_read_only_session)
     CK_SESSION_HANDLE ro = 0;
     ASSERT_CKR_OK(p11()->C_OpenSession(kSlot, CKF_SERIAL_SESSION, nullptr, nullptr, &ro));
     CK_BYTE payload[4] = { 1, 2, 3, 4 };
-    CK_ATTRIBUTE tmpl[] = { { CKA_VALUE, payload, sizeof(payload) },
+    CK_ATTRIBUTE tmpl[] = { { CKA_CLASS, &g_data, sizeof(g_data) },
+                            { CKA_VALUE, payload, sizeof(payload) },
                             { CKA_TOKEN, &g_true, sizeof(g_true) } };
     CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
-    EXPECT_CKR(CKR_SESSION_READ_ONLY, p11()->C_CreateObject(ro, tmpl, 2, &obj));
+    EXPECT_CKR(CKR_SESSION_READ_ONLY, p11()->C_CreateObject(ro, tmpl, 3, &obj));
     // A session object is fine there, as in C_GenerateKey.
-    CK_ATTRIBUTE session_tmpl[] = { { CKA_VALUE, payload, sizeof(payload) },
+    CK_ATTRIBUTE session_tmpl[] = { { CKA_CLASS, &g_data, sizeof(g_data) },
+                                    { CKA_VALUE, payload, sizeof(payload) },
                                     { CKA_TOKEN, &g_false, sizeof(g_false) } };
-    EXPECT_CKR_OK(p11()->C_CreateObject(ro, session_tmpl, 2, &obj));
+    EXPECT_CKR_OK(p11()->C_CreateObject(ro, session_tmpl, 3, &obj));
     EXPECT_CKR_OK(p11()->C_CloseSession(ro));
 }
 

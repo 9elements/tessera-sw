@@ -127,7 +127,7 @@ static CK_RV write_file(
     }
     if (len > P11_STORE_MAX_FILE_SIZE)
     {
-        return CKR_DATA_LEN_RANGE;
+        return CKR_DEVICE_MEMORY; /* C_CreateObject and C_SetAttributeValue have no *_LEN_RANGE */
     }
 
     char path[P11_STORE_PATH_MAX];

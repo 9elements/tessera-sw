@@ -9,7 +9,8 @@
  *
  *   gcc -I ../include/pkcs11-v3.1 -I ../src mech_table_test.c \
  *       ../src/tsra_pkcs11_mech.c ../src/tsra_pkcs11_template.c \
- *       ../src/tsra_pkcs11_digest.c -o mech_table_test && ./mech_table_test
+ *       ../src/tsra_pkcs11_attr_types.c ../src/tsra_pkcs11_digest.c \
+ *       -o mech_table_test && ./mech_table_test
  *
  * Both directions: every row advertises exactly the flags its arms implement,
  * and every mechanism an arm implements has a row. A row without its arm, or

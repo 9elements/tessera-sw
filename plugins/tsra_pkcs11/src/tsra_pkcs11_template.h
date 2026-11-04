@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "tsra_pkcs11_attr_types.h"
 #include "tsra_pkcs11_compat.h"
 #include "tsra_pkcs11_key.h"
 
@@ -29,22 +30,14 @@ extern "C"
 #define AES_XTS_KEY_BYTES 64
 
 /*
- * Ceiling on the caller's template length. PKCS#11 defines some forty
- * attributes for a secret-key object, so anything longer is treated as a bogus
- * ulCount and refused with CKR_ARGUMENTS_BAD before the O(n²) duplicate scan
- * runs over it and before the store buffer in C_GenerateKey is sized from it.
- */
-#define KEYGEN_MAX_TEMPLATE_ATTRS 64
-
-/*
  * Attributes tsra_pkcs11_keygen_build_template appends to the caller's
- * template: CKA_CLASS, CKA_KEY_TYPE, CKA_SENSITIVE, CKA_EXTRACTABLE,
- * CKA_ENCRYPT, CKA_DECRYPT, CKA_ALLOWED_MECHANISMS (each only if absent), plus
- * CKA_LOCAL, CKA_ALWAYS_SENSITIVE, CKA_NEVER_EXTRACTABLE and
+ * template: CKA_CLASS, CKA_KEY_TYPE, CKA_PRIVATE, CKA_SENSITIVE,
+ * CKA_EXTRACTABLE, CKA_ENCRYPT, CKA_DECRYPT, CKA_ALLOWED_MECHANISMS (each only
+ * if absent), plus CKA_LOCAL, CKA_ALWAYS_SENSITIVE, CKA_NEVER_EXTRACTABLE and
  * CKA_KEY_GEN_MECHANISM (always). Bounds the headroom the caller must reserve
  * in the output array.
  */
-#define KEYGEN_APPENDED_ATTRS 11
+#define KEYGEN_APPENDED_ATTRS 12
 
 /*
  * Ceiling on the entries of a caller's CKA_ALLOWED_MECHANISMS. No key this
@@ -96,14 +89,15 @@ CK_RV tsra_pkcs11_tmpl_bool(const CK_ATTRIBUTE *a, CK_BBOOL *out);
  * whether the caller asked for a token object (*token). All outputs are
  * cleared first and are meaningful only on CKR_OK. Returns:
  *   CKR_ARGUMENTS_BAD             NULL outputs, NULL tmpl with count > 0, or
- *                                 count > KEYGEN_MAX_TEMPLATE_ATTRS
+ *                                 count > TEMPLATE_MAX_ATTRS
  *   CKR_MECHANISM_INVALID         `mech` is not an AES key-generation mechanism
- *   CKR_ATTRIBUTE_VALUE_INVALID   NULL value with a non-zero length, a wrongly
- *                                 sized CLASS/KEY_TYPE/VALUE_LEN/CK_BBOOL value,
- *                                 a CKA_ALLOWED_MECHANISMS that is empty, not a
- *                                 whole number of entries or longer than
- *                                 KEYGEN_MAX_ALLOWED_MECHS, or a CKA_VALUE_LEN
- *                                 the chosen family cannot be generated at
+ *   CKR_ATTRIBUTE_VALUE_INVALID   values over TEMPLATE_MAX_VALUE_BYTES, a value
+ *                                 of the wrong shape (tsra_pkcs11_attr_check),
+ *                                 a CKA_ALLOWED_MECHANISMS that is empty or
+ *                                 longer than KEYGEN_MAX_ALLOWED_MECHS, or a
+ *                                 CKA_VALUE_LEN the chosen family cannot be
+ *                                 generated at
+ *   CKR_ATTRIBUTE_TYPE_INVALID    an attribute array (tsra_pkcs11_attr_check)
  *   CKR_TEMPLATE_INCONSISTENT     a repeated attribute type, CKA_CLASS other
  *                                 than CKO_SECRET_KEY, CKA_KEY_TYPE other than
  *                                 the family's, a CKA_ALLOWED_MECHANISMS no
@@ -111,11 +105,10 @@ CK_RV tsra_pkcs11_tmpl_bool(const CK_ATTRIBUTE *a, CK_BBOOL *out);
  *                                 or naming any mechanism outside the family
  *                                 `mech` produces), CKA_SENSITIVE=FALSE,
  *                                 CKA_EXTRACTABLE=TRUE (device keys only ever
- *                                 exist masked), or CKA_VALUE (generated keys
- *                                 take no material)
- *   CKR_ATTRIBUTE_READ_ONLY       CKA_LOCAL / CKA_ALWAYS_SENSITIVE /
- *                                 CKA_NEVER_EXTRACTABLE / CKA_KEY_GEN_MECHANISM
- *                                 (token-computed)
+ *                                 exist masked), or key material (generated
+ *                                 keys take none)
+ *   CKR_ATTRIBUTE_READ_ONLY       an attribute only the token sets
+ *                                 (tsra_pkcs11_attr_is_token_set)
  *   CKR_TEMPLATE_INCOMPLETE       no CKA_VALUE_LEN
  *   CKR_OK                        otherwise; unknown types are accepted and
  *                                 later stored verbatim
@@ -150,8 +143,9 @@ typedef struct
  * identify the object for search and C_GetAttributeValue, the allowed
  * mechanisms record the key family `policy` chose, the sensitivity quartet
  * states the only possible key-protection reality, CKA_LOCAL and
- * CKA_KEY_GEN_MECHANISM say how the key came to be, and the usage defaults
- * make an attribute-less template usable. A caller's own
+ * CKA_KEY_GEN_MECHANISM say how the key came to be, a key is private unless
+ * the caller says otherwise, and the usage defaults make an attribute-less
+ * template usable. A caller's own
  * CKA_ALLOWED_MECHANISMS (already checked to lie within the family) is kept
  * as the narrower list. `full` must have room for count +
  * KEYGEN_APPENDED_ATTRS entries; *n receives the number written. `tmpl` is

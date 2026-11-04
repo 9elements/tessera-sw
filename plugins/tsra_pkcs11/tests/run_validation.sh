@@ -7,11 +7,12 @@
 # pkcs11-tool, and runs the device-free unit harnesses under UBSan and ASan
 # (build_units.sh); if the mock-backed module has been built (cargo build -p
 # tsra_pkcs11 --features mock; TSRA_PKCS11_MODULE overrides its path), it also
-# runs the C_Login provisioning ceremony, a pkcs11-tool AES keygen, the gtest
-# functional suite (integration-tests/cpp) on the memory and the file object
-# store, and the pkcs11test conformance gate (tests/pkcs11test) against the
-# simulator. The workflow's ASan module build (functional-asan) is not
-# repeated here.
+# runs the C_Login provisioning ceremony, a pkcs11-tool AES keygen and a
+# refused pkcs11-tool key import, the gtest functional suite
+# (integration-tests/cpp) on the memory and the file object store, and the
+# pkcs11test conformance gate (tests/pkcs11test) against the simulator. The
+# workflow's ASan module build (functional-asan) and its libFuzzer run
+# (template-fuzz, which needs clang) are not repeated here.
 #
 # pkcs11-tool is expected locally (extracted from a distro package, no system
 # install). Point PKCS11_TESTING at that directory; it defaults to the
@@ -77,6 +78,14 @@ if [ -f "$HSMMOD" ]; then
         --key-type aes:32 --label validation --sensitive 2>&1 | sed 's/^/   /'; then
         echo "   (AES keygen failed)"; exit 1
     fi
+
+    echo; echo "== mock-backed: plaintext key import via pkcs11-tool is refused =="
+    printf '0123456789abcdef' > "$WORK/import.key"
+    pkcs11-tool --module "$HSMMOD" --login --pin 1234 --write-object "$WORK/import.key" \
+        --type secrkey --key-type AES:16 --label import > "$WORK/import.log" 2>&1 || true
+    sed 's/^/   /' "$WORK/import.log"
+    grep -q CKR_TEMPLATE_INCONSISTENT "$WORK/import.log" \
+        || { echo "   (plaintext key import was not refused)"; exit 1; }
 
     echo; echo "== mock-backed: gtest functional suite (integration-tests/cpp) =="
     # googletest is fetched by CMake. Cache only its SOURCE between runs and
