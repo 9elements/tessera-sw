@@ -110,11 +110,22 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     tsra_pkcs11_pad_str(pInfo->model, sizeof(pInfo->model), TSRA_PKCS11_TOKEN_MODEL);
     tsra_pkcs11_pad_str(pInfo->serialNumber, sizeof(pInfo->serialNumber), slot->serial);
 
-    /* No CKF_RNG: the device offers the host no random-number generator. */
+    /*
+     * The first C_Login after power-on provisions the partition with its PIN,
+     * so the token has no initialisation step of its own (C_InitToken and
+     * C_InitPIN are not supported) and is initialised, with a user PIN, from
+     * the start. No CKF_RNG: the device offers the host no random-number
+     * generator.
+     */
     pInfo->flags = CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED;
     if (slot->token_initialized)
     {
         pInfo->flags |= CKF_TOKEN_INITIALIZED;
+    }
+    /* A login without a PIN uses the configured default PIN. */
+    if (g_tsra_pkcs11.default_pin)
+    {
+        pInfo->flags |= CKF_PROTECTED_AUTHENTICATION_PATH;
     }
 
     /* The session table is module-wide, so its size bounds every token. */

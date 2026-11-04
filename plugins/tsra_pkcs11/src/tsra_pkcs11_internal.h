@@ -22,7 +22,7 @@
 #define TSRA_PKCS11_TOKEN_MODEL "TSRA"
 #define TSRA_PKCS11_SLOT_DESC "Azure Integrated HSM partition"
 
-/* Cryptoki version reported from C_GetInfo / the 3.0 interface. */
+/* Cryptoki version reported from C_GetInfo and the default interface. */
 #define TSRA_PKCS11_CK_MAJOR 3
 #define TSRA_PKCS11_CK_MINOR 1
 /* Legacy version reported through the classic CK_FUNCTION_LIST. */
@@ -35,13 +35,8 @@
 #define TSRA_PKCS11_MAX_SLOTS 16
 #define TSRA_PKCS11_MAX_SESSIONS 256
 
-/* Advertised PIN length range (C_GetTokenInfo); the TSRA credential PIN is a
- * fixed 16-byte value. Enforced in C_Login. */
-#define TSRA_PKCS11_MIN_PIN_LEN 4
-#define TSRA_PKCS11_MAX_PIN_LEN 16
-
 /* ------------------------------------------------------------------------- */
-/* Logging (enable with env TSRA_PKCS11_DEBUG=1; off by default)           */
+/* Logging (enabled by the debug setting; off by default)                    */
 /* ------------------------------------------------------------------------- */
 
 void tsra_pkcs11_log(const char *fmt, ...);
@@ -144,6 +139,7 @@ typedef struct
     bool initialized;
     pthread_mutex_t lock; /* one coarse module lock; held across store calls */
     bool os_locking_ok;   /* from CK_C_INITIALIZE_ARGS */
+    bool default_pin;     /* a default PIN is configured: CKF_PROTECTED_AUTHENTICATION_PATH */
 
     tsra_pkcs11_slot_t slots[TSRA_PKCS11_MAX_SLOTS];
     CK_ULONG slot_count;
@@ -195,7 +191,3 @@ void tsra_pkcs11_cipher_op_free(void *op_ctx);
 
 /* Fill a fixed-width, space-padded CK_UTF8CHAR string field. */
 void tsra_pkcs11_pad_str(CK_UTF8CHAR *dst, size_t dstlen, const char *src);
-
-/* The two shared function-list tables (defined in tsra_pkcs11_dispatch.c). */
-extern CK_FUNCTION_LIST tsra_pkcs11_function_list;         /* v2.40 view */
-extern CK_FUNCTION_LIST_3_0 tsra_pkcs11_function_list_3_0; /* v3.x view  */

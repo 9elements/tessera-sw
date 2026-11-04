@@ -49,7 +49,8 @@ HARNESS=(
     "aes_template_test tsra_pkcs11_template.c tsra_pkcs11_status.c"
     "attr_policy_test tsra_pkcs11_attr_policy.c tsra_pkcs11_template.c"
     "mech_table_test tsra_pkcs11_mech.c tsra_pkcs11_template.c tsra_pkcs11_digest.c"
-    "config_test tsra_pkcs11_config.c"
+    "config_test tsra_pkcs11_config.c tsra_pkcs11_store_io.c"
+    "config_file_test tsra_pkcs11_config.c tsra_pkcs11_store_io.c"
 )
 
 echo "unit harnesses (${SANITIZE:-ubsan}):"
@@ -57,7 +58,9 @@ for entry in "${HARNESS[@]}"; do
     read -r -a words <<< "$entry"
     name="${words[0]}"
     srcs=("${words[@]:1}")
-    gcc -Wall -Wextra -Werror "${SAN[@]}" \
+    # TSRA_WITH_HSM: the hardware build's configuration rules. No harness links
+    # the device code.
+    gcc -Wall -Wextra -Werror "${SAN[@]}" -DTSRA_WITH_HSM \
         -I"$PLUGIN/include/pkcs11-v3.1" -I"$PLUGIN/src" \
         "$HERE/$name.c" "${srcs[@]/#/$PLUGIN/src/}" \
         -o "$OUT/$name" -lpthread

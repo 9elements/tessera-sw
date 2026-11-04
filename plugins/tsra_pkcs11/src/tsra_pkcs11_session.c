@@ -10,6 +10,7 @@
  */
 
 #include "tsra_pkcs11_attr_policy.h"
+#include "tsra_pkcs11_config.h"
 #include "tsra_pkcs11_digest.h"
 #include "tsra_pkcs11_hsm.h"
 #include "tsra_pkcs11_internal.h"
@@ -377,35 +378,32 @@ CK_RV C_Login(
     {
     case CKU_USER: {
         /*
-         * Validate the PIN against the advertised range (C_GetTokenInfo) so the
-         * outcome is deterministic: a NULL buffer with a non-zero length is a
-         * caller error, and an out-of-range length is rejected rather than
-         * silently truncated in the HSM binding. A zero-length PIN is the
-         * "no PIN" case and falls back to the configured default.
+         * The PIN rules come before the login state, so a malformed PIN gets
+         * the same answer in every state. An empty PIN means the configured
+         * default PIN (CKF_PROTECTED_AUTHENTICATION_PATH) and is out of range
+         * without one.
          */
-        if (pPin == NULL_PTR && ulPinLen > 0)
+        CK_BYTE pin[P11_CREDS_PIN_LEN];
+        bool use_default = (ulPinLen == 0) && g_tsra_pkcs11.default_pin;
+        if (!use_default)
         {
-            rv = CKR_ARGUMENTS_BAD;
-            break;
+            rv = tsra_pkcs11_pin_normalise(pPin, ulPinLen, pin);
         }
-        if (ulPinLen > 0 &&
-            (ulPinLen < TSRA_PKCS11_MIN_PIN_LEN || ulPinLen > TSRA_PKCS11_MAX_PIN_LEN))
-        {
-            rv = CKR_PIN_LEN_RANGE;
-            break;
-        }
-        if (slot->user_logged_in)
+        if ((rv == CKR_OK) && slot->user_logged_in)
         {
             rv = CKR_USER_ALREADY_LOGGED_IN;
-            break;
         }
-        uint32_t hs = 0;
-        rv = tsra_pkcs11_hsm_login(s->slot, pPin, ulPinLen, &hs);
         if (rv == CKR_OK)
         {
-            slot->hsm_session = hs;
-            slot->user_logged_in = true;
+            uint32_t hs = 0;
+            rv = tsra_pkcs11_hsm_login(s->slot, use_default ? NULL : pin, &hs);
+            if (rv == CKR_OK)
+            {
+                slot->hsm_session = hs;
+                slot->user_logged_in = true;
+            }
         }
+        tsra_pkcs11_wipe(pin, sizeof(pin));
         break;
     }
     case CKU_SO:

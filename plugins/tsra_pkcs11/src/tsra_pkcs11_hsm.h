@@ -28,16 +28,15 @@ int32_t tsra_pkcs11_hsm_enumerate_slots(void);
 
 /*
  * Log a user into `slot`: open the partition, provision it lazily (only if the
- * device reports it is not yet provisioned — provisioning is one-shot per power
- * cycle), then open a session. On success writes the TSRA session handle to
- * *out_session. `pin`/`pin_len` are the C_Login PIN (see the PIN-shape mapping).
+ * device reports it is not yet provisioned: provisioning is one-shot per power
+ * cycle), then open a session. `pin` is the 16-byte credential PIN
+ * (tsra_pkcs11_pin_normalise), or NULL for the configured default PIN. On
+ * success writes the TSRA session handle to *out_session. Reloads the
+ * configuration and reads the owner backup key before the device session
+ * opens, and fails closed with CKR_FUNCTION_FAILED when either is unusable
+ * (tsra_pkcs11_config.h), even on a provisioned partition.
  */
-CK_RV tsra_pkcs11_hsm_login(
-    CK_SLOT_ID slot,
-    const CK_UTF8CHAR *pin,
-    CK_ULONG pin_len,
-    uint32_t *out_session
-);
+CK_RV tsra_pkcs11_hsm_login(CK_SLOT_ID slot, const CK_BYTE *pin, uint32_t *out_session);
 
 /* Close a previously opened TSRA session (no-op if 0). */
 void tsra_pkcs11_hsm_logout(uint32_t hsm_session);

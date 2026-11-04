@@ -16,6 +16,8 @@ the environment:
 | `TSRA_PKCS11_HW=1` | The module drives a real device. Cases named `*_hw` run; mock-only cases skip. |
 | `TSRA_PKCS11_MODULE` | Path of the hardware-backed `tsra_pkcs11.so`. |
 | `TSRA_PKCS11_TEST_PIN` | The user PIN of the partition (default: the simulator's `1234`). |
+| `TSRA_PKCS11_ID` | The partition ID, 32 hex characters. A hardware build has no built-in one and does not initialise without it. |
+| `TSRA_PKCS11_OBK_PATH` | The 48-byte owner backup key file (or `obk_path` in the file `TSRA_PKCS11_CONF` names). A hardware build does not initialise without it, and every login reads it. |
 | `TSRA_PKCS11_PERSIST=1`, `TSRA_PKCS11_STORE_DIR` | The file object store, in a directory that does not exist yet. |
 
 ```sh
@@ -55,10 +57,18 @@ and the result of the last hardware run.
 
 ### H-b Provisioning through C_Login on a fresh partition
 
-- Run: the first `C_Login` on a partition nobody has provisioned.
+- Run: the first `C_Login` on a partition nobody has provisioned; then the
+  same without `TSRA_PKCS11_ID`, without an owner backup key, and with a key
+  file of 47 bytes.
 - Expect: `CKR_OK`. The caller endorsement the module builds at run time (a
   fresh P-384 key from host libcrypto) passes the device's PKA check; the
-  simulator checks it in software only.
+  simulator checks it in software only. Without the partition ID or the
+  owner backup key, `C_Initialize` fails with `CKR_GENERAL_ERROR` and a debug
+  line. With the short key file, `C_Login` fails with `CKR_FUNCTION_FAILED`
+  and a debug line, on a fresh partition (which stays unprovisioned) and on
+  a provisioned one.
+- Cases: `config_test` (unit, the hardware build's configuration),
+  `login.every_login_reads_the_owner_backup_key` (mock only).
 - Result: not run yet.
 
 ### H-c Provisioning race
@@ -75,11 +85,12 @@ and the result of the last hardware run.
 - Run: a second process logs in with the same PIN, another PIN and an empty
   PIN, and uses a token key the first process created.
 - Expect: the same PIN logs in; another PIN fails with `CKR_FUNCTION_FAILED`
-  (not `CKR_PIN_INCORRECT` until the SDK names the status); the token key
-  works in the second process. The mock cannot show the last part: it
-  provisions every process afresh.
+  (not `CKR_PIN_INCORRECT` until the SDK names the status); an empty PIN
+  fails with `CKR_PIN_LEN_RANGE` unless `TSRA_PKCS11_PIN` sets a default; the
+  token key works in the second process. The mock cannot show the last part:
+  it provisions every process afresh.
 - Cases: `persist.a_second_process_sees_the_token_object` (the object, not
-  the key).
+  the key), `login.*`.
 - Result: not run yet.
 
 ### H-e Power cycle and NSSR

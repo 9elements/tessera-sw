@@ -106,31 +106,28 @@ int32_t tsra_pkcs11_hsm_enumerate_slots(void)
     return (int32_t)produced;
 }
 
-/* Build the fixed-size TSRA credential from the configured id plus either the
- * caller's C_Login PIN or, when none was given, the configured default PIN. */
-static void make_creds(
+_Static_assert(
+    (sizeof(((struct tsra_credentials *)0)->id) == P11_CREDS_ID_LEN) &&
+        (sizeof(((struct tsra_credentials *)0)->pin) == P11_CREDS_PIN_LEN),
+    "the configured credential matches the device's"
+);
+
+/* Build the TSRA credential from the configured partition ID and the 16-byte
+ * credential PIN, or the configured default PIN when `pin` is NULL. */
+static CK_RV make_creds(
     struct tsra_credentials *creds,
     const tsra_pkcs11_config *cfg,
-    const CK_UTF8CHAR *pin,
-    CK_ULONG pin_len
+    const CK_BYTE *pin
 )
 {
     memset(creds, 0, sizeof(*creds));
+    if ((pin == NULL) && !cfg->default_pin_set)
+    {
+        return CKR_PIN_LEN_RANGE; /* the default PIN went away after C_Initialize */
+    }
     memcpy(creds->id, cfg->id, sizeof(creds->id));
-    if (pin != NULL && pin_len > 0)
-    {
-        /* PIN-shape mapping: the PKCS#11 PIN (length already range-checked
-         * against the advertised 16-byte max in C_Login) is copied into the
-         * fixed 16-byte TSRA pin. A stable derivation (e.g. hash-to-16) is a
-         * follow-up once the shape is agreed; the min() stays as a defensive
-         * bound. */
-        size_t n = pin_len < sizeof(creds->pin) ? (size_t)pin_len : sizeof(creds->pin);
-        memcpy(creds->pin, pin, n);
-    }
-    else
-    {
-        memcpy(creds->pin, cfg->default_pin, sizeof(creds->pin));
-    }
+    memcpy(creds->pin, (pin != NULL) ? pin : cfg->default_pin, sizeof(creds->pin));
+    return CKR_OK;
 }
 
 /*
@@ -262,13 +259,13 @@ cleanup:
 }
 
 /* Run the one-time provisioning ceremony on an already-open partition handle,
- * with the owner backup key from `cfg`. Returns the device's raw status: the
+ * with the owner backup key `obk`. Returns the device's raw status: the
  * caller decides which non-OK statuses (e.g. a concurrent process winning the
  * provisioning race) still allow the login to proceed. */
 static tsra_status provision(
     tsra_handle dev,
     const struct tsra_credentials *creds,
-    tsra_pkcs11_config *cfg
+    CK_BYTE obk[P11_OBK_LEN]
 )
 {
     struct tsra_part_prop prop = { TSRA_PART_PROP_ID_PART_PUB_KEY, NULL, 0 };
@@ -301,7 +298,7 @@ static tsra_status provision(
         return TSRA_INTERNAL_ERROR;
     }
 
-    struct tsra_buffer obk_buf = { cfg->obk, sizeof(cfg->obk) };
+    struct tsra_buffer obk_buf = { obk, P11_OBK_LEN };
     struct tsra_owner_backup_key_config obk_cfg = { TSRA_OWNER_BACKUP_KEY_SOURCE_CALLER,
                                                     &obk_buf,
                                                     NULL };
@@ -313,12 +310,7 @@ static tsra_status provision(
     return tsra_part_init(dev, creds, NULL, NULL, &obk_cfg, &pota, NULL);
 }
 
-CK_RV tsra_pkcs11_hsm_login(
-    CK_SLOT_ID slot,
-    const CK_UTF8CHAR *pin,
-    CK_ULONG pin_len,
-    uint32_t *out_session
-)
+CK_RV tsra_pkcs11_hsm_login(CK_SLOT_ID slot, const CK_BYTE *pin, uint32_t *out_session)
 {
     if (out_session == NULL)
     {
@@ -346,16 +338,31 @@ CK_RV tsra_pkcs11_hsm_login(
         sl->hsm_dev = dev;
     }
 
-    /* Both hold credential bytes (cfg also the owner backup key): every exit
-     * below passes the wipe at cleanup. */
+    /* All three hold secret bytes: every exit below passes the wipe at
+     * cleanup. */
     struct tsra_credentials creds;
     tsra_pkcs11_config cfg;
+    CK_BYTE obk[P11_OBK_LEN];
     CK_RV rv = tsra_pkcs11_config_load(&cfg);
+    if (rv != CKR_OK)
+    {
+        TSRA_PKCS11_LOG("C_Login: configuration refused: %s", cfg.error);
+        rv = CKR_FUNCTION_FAILED;
+        goto cleanup;
+    }
+    rv = make_creds(&creds, &cfg, pin);
     if (rv != CKR_OK)
     {
         goto cleanup;
     }
-    make_creds(&creds, &cfg, pin, pin_len);
+    /* Read at every login, not only when provisioning, so a lost or broken key
+     * file shows before the next power cycle needs it. */
+    rv = tsra_pkcs11_config_obk(&cfg, obk);
+    if (rv != CKR_OK)
+    {
+        TSRA_PKCS11_LOG("C_Login: owner backup key %s is not a regular 48-byte file", cfg.obk_path);
+        goto cleanup;
+    }
 
     /* Login = OpenSession. Provisioning is a separate, one-shot-per-power-cycle
      * device operation; run it only if the device says it is not yet provisioned
@@ -364,7 +371,7 @@ CK_RV tsra_pkcs11_hsm_login(
     tsra_status st = tsra_sess_open(sl->hsm_dev, &creds, NULL, &sess);
     if (st == TSRA_CREDENTIALS_NOT_ESTABLISHED || st == TSRA_PARTITION_NOT_PROVISIONED)
     {
-        st = provision(sl->hsm_dev, &creds, &cfg);
+        st = provision(sl->hsm_dev, &creds, obk);
         /* ALREADY_PROVISIONED / VAULT_APP_LIMIT_REACHED mean a concurrent
          * process won the provisioning race between our sess_open probe and the
          * part_init; the SDK treats both as "credentials already established"
@@ -391,6 +398,7 @@ CK_RV tsra_pkcs11_hsm_login(
 
 cleanup:
     tsra_pkcs11_wipe(&creds, sizeof(creds));
+    tsra_pkcs11_wipe(obk, sizeof(obk));
     tsra_pkcs11_config_clear(&cfg);
     return rv;
 }
@@ -433,16 +441,10 @@ int32_t tsra_pkcs11_hsm_enumerate_slots(void)
     return 1; /* slot count: the placeholder above */
 }
 
-CK_RV tsra_pkcs11_hsm_login(
-    CK_SLOT_ID slot,
-    const CK_UTF8CHAR *pin,
-    CK_ULONG pin_len,
-    uint32_t *out_session
-)
+CK_RV tsra_pkcs11_hsm_login(CK_SLOT_ID slot, const CK_BYTE *pin, uint32_t *out_session)
 {
     (void)slot;
     (void)pin;
-    (void)pin_len;
     if (out_session == NULL)
     {
         return CKR_ARGUMENTS_BAD;

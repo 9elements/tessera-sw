@@ -126,6 +126,8 @@ class SubprocessModule
 };
 
 /// The first statement of a case that only runs as SubprocessModule's child.
+/// In the child it reports ran=1: a filter that matches no case exits 0 too,
+/// so a parent checks that value to know the case ran at all.
 #define SUBPROCESS_ONLY()                                                                          \
     do                                                                                             \
     {                                                                                              \
@@ -133,4 +135,5 @@ class SubprocessModule
         {                                                                                          \
             GTEST_SKIP() << "runs only as the second process of another case";                     \
         }                                                                                          \
+        SubprocessModule::report("ran", "1");                                                      \
     } while (0)

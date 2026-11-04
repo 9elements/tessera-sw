@@ -13,7 +13,9 @@ the spec requires). Implemented so far:
 
 - **Library / slots / sessions** — `C_Initialize`, `C_GetInfo`, slot/token/
   mechanism enumeration (real TSRA partitions become slots), sessions and the
-  login state machine, and the `C_GetInterface` "PKCS 11" interface.
+  login state machine. The "PKCS 11" interface comes in versions 3.1 (the
+  default), 3.0 and 2.40 (`C_GetInterfaceList`, `C_GetInterface`), and
+  `C_GetFunctionList` returns the 2.40 table.
   `C_GetMechanismList` reports only the ten mechanisms below, and
   `C_GetTokenInfo` the real session counts (at most 256 sessions).
 - **`C_Login`**: runs the TSRA provisioning ceremony and opens one device
@@ -22,7 +24,8 @@ the spec requires). Implemented so far:
   yet provisioned (provisioning is one-shot per power cycle; a session is the
   repeatable per-login primitive). Login state is per token, so every PKCS#11
   session of the slot shares that one device session. It closes at
-  `C_Logout`, when the slot's last session closes, and at `C_Finalize`.
+  `C_Logout`, when the slot's last session closes, and at `C_Finalize`. The
+  token has one user; see User role and PIN.
 - **Host objects** — `C_CreateObject` / `C_DestroyObject` / `C_GetAttributeValue`
   / `C_SetAttributeValue` / `C_GetObjectSize` / `C_FindObjects*` against the
   host object store: in memory, or token objects in files with
@@ -99,6 +102,10 @@ the spec requires). Implemented so far:
 
 ## Deviations from PKCS#11
 
+- **One user, no PIN management.** There is no Security Officer, and
+  `C_InitToken`, `C_InitPIN` and `C_SetPIN` are not supported. A wrong PIN
+  returns `CKR_FUNCTION_FAILED`, not `CKR_PIN_INCORRECT`. See User role and
+  PIN.
 - **No random-number generator.** The device offers the host none, so the
   token does not set `CKF_RNG`, and `C_GenerateRandom` and `C_SeedRandom`
   return `CKR_RANDOM_NO_RNG`.
@@ -167,14 +174,15 @@ What a token key survives:
 
 | Layer | Files | Responsibility |
 |---|---|---|
-| C ABI | `tsra_pkcs11_dispatch.c` | `CK_FUNCTION_LIST` + `_3_0` + the "PKCS 11" interface |
+| C ABI | `tsra_pkcs11_dispatch.c` | the 2.40, 3.0 and 3.1 function lists and the "PKCS 11" interfaces over them; `C_LoginUser` |
 | Framework | `tsra_pkcs11_module.c`, `tsra_pkcs11_slot.c`, `tsra_pkcs11_session.c`, `tsra_pkcs11_mech.c` | init, slots, sessions, login, operation state machine; the mechanism table is a device-free unit of its own |
 | Host crypto | `tsra_pkcs11_digest.c` | self-contained SHA-1/256/384/512 (PKCS#11 digests must work in public sessions; the SDK digest needs a login) |
 | Object store | `tsra_pkcs11_objstore.h`, `tsra_pkcs11_objstore_mem.c` | host-side objects behind a vtable seam; the in-memory backend |
 | File store | `tsra_pkcs11_objstore_file.c`, `tsra_pkcs11_store_record.c`, `tsra_pkcs11_store_io.c` | the persistent backend for token objects (session objects stay in memory): one record file per object, the record codec, and the crash-safe, owner-only filesystem primitives with a cross-process lock |
 | Object policy | `tsra_pkcs11_attr_policy.c` | which attributes `C_SetAttributeValue` may change, per class; a device-free unit of its own |
 | Key operations | `tsra_pkcs11_crypt.c`, `tsra_pkcs11_template.c` | key-backed entry points: operation state and the masked-blob store/unmask flow (CK_RV only); the keygen template validation, key-family choice and cipher mechanism policy are a device-free unit of their own |
-| HSM binding | `tsra_pkcs11_hsm.c`, `tsra_pkcs11_key.c`, `tsra_pkcs11_status.c`, `tsra_pkcs11_config.c` | the only code that calls `tsra_*` and maps `tsra_status` → `CK_RV` |
+| Configuration | `tsra_pkcs11_config.c` | the configuration file and environment, the PIN rules and the owner backup key file; a device-free unit of its own |
+| HSM binding | `tsra_pkcs11_hsm.c`, `tsra_pkcs11_key.c`, `tsra_pkcs11_status.c` | the only code that calls `tsra_*` and maps `tsra_status` to `CK_RV` |
 | Not implemented | `tsra_pkcs11_stubs.c` (generated) | everything else → `CKR_FUNCTION_NOT_SUPPORTED` |
 
 The object store is the emulation layer PKCS#11 requires and the device does not
@@ -202,20 +210,78 @@ copyright check skips that directory.
 
 ## Configuration
 
-Credentials are read from the environment (`TSRA_PKCS11_ID` /
-`TSRA_PKCS11_PIN`, each 32 hex characters); simulator defaults are used when
-unset. Set `TSRA_PKCS11_DEBUG=1` for stderr tracing.
+The module reads its settings at `C_Initialize` and again at every
+`C_Login`: from the file `TSRA_PKCS11_CONF` names, if set, and from the
+environment, which wins over the file key by key. The file has one
+`key = value` per line; a line starting with `#` is a comment.
+`tsra_pkcs11.conf.sample` next to this README shows every key.
 
-Token objects live in memory and end with the process unless
-`TSRA_PKCS11_PERSIST=1` (or `true`) selects the file store. It keeps them
-under `TSRA_PKCS11_STORE_DIR` (default `/var/lib/tsra/pkcs11`; a `file:`
-prefix is accepted), one subdirectory per slot. The module creates a missing
-directory with mode 0700 (its parent must exist) and refuses an existing one
-that is not a directory the calling user owns with mode 0700, so
-`C_Initialize` fails. A `TSRA_PKCS11_STORE_DIR` that is empty, contains `..`
-or is longer than 4095 bytes makes `C_Initialize` return `CKR_ARGUMENTS_BAD`,
-with or without `TSRA_PKCS11_PERSIST`, instead of falling back to the
-default.
+| Key | Environment | Default | Meaning |
+|---|---|---|---|
+| `persist` | `TSRA_PKCS11_PERSIST` | `0` | `1` keeps token objects in files under `store_dir`; `0` keeps them in memory until the process ends. |
+| `store_dir` | `TSRA_PKCS11_STORE_DIR` | `/var/lib/tsra/pkcs11` | The file store, one subdirectory per slot. |
+| `obk_path` | `TSRA_PKCS11_OBK_PATH` | none | The 48-byte owner backup key file. Every `C_Login` reads it; only a login that provisions the partition hands it to the device. The OpenSSL provider's `tsra-obk-path` file fits. |
+| `debug` | `TSRA_PKCS11_DEBUG` | `0` | `1` traces to stderr. |
+
+Credentials are never read from the file, only from the environment, as 32
+hex characters (16 bytes) each:
+
+- `TSRA_PKCS11_ID`: the partition ID.
+- `TSRA_PKCS11_PIN`: a default PIN, as the 16-byte credential PIN (a typed
+  PIN zero-padded). With it the token reports
+  `CKF_PROTECTED_AUTHENTICATION_PATH`, and a `C_Login` without a PIN uses it.
+
+The mock build has a built-in partition ID and owner backup key. A hardware
+build has neither and needs both in every process: without `TSRA_PKCS11_ID`
+or `obk_path`, `C_Initialize` returns `CKR_GENERAL_ERROR` with a debug line.
+`C_Initialize` only takes the key file's name; the key is in memory only
+during a `C_Login`. Every `C_Login` reads the file before it opens the device session,
+also on a provisioned partition, and returns `CKR_FUNCTION_FAILED` with a
+debug line when it is missing, a symbolic link or not exactly 48 bytes. The
+mock reads a configured `obk_path` the same way.
+
+A bad setting fails closed instead of falling back to a default: an unknown
+key (a credential included), a line without `=`, a boolean other than `1`,
+`0`, `true` or `false` (any case), a credential that is not 32 hex
+characters, a missing or empty file, and a path that is not absolute,
+contains `..` or is longer than 4095 bytes make `C_Initialize` return
+`CKR_GENERAL_ERROR`. `TSRA_PKCS11_DEBUG=1` prints the reason, with the line
+for the file. Every path, `TSRA_PKCS11_CONF` included, must be absolute and
+may carry a `file:` prefix. The configuration file and the owner backup key
+file must be regular files, not symbolic links.
+
+The module creates a missing store directory with mode 0700 (its parent must
+exist) and refuses an existing one that is not a directory the calling user
+owns with mode 0700, so `C_Initialize` fails.
+
+## User role and PIN
+
+This is the agreed user-role and PIN behaviour. The module logs in with the
+device's V1 session, whose credential is a 16-byte partition ID plus a
+16-byte PIN, so the token has exactly one user.
+
+- `C_Login` as `CKU_USER` is the only login; `C_LoginUser` is the same call
+  and ignores the username. `CKU_SO` returns `CKR_USER_TYPE_INVALID`.
+  `C_InitToken`, `C_InitPIN` and `C_SetPIN` return
+  `CKR_FUNCTION_NOT_SUPPORTED`: the device session has no Security Officer
+  and no PIN change.
+- A PIN has 4 to 16 bytes. It becomes the credential PIN zero-padded to 16
+  bytes, unhashed, so the OpenSSL provider can present the same credential
+  as raw bytes to the same partition. A PIN of another length returns `CKR_PIN_LEN_RANGE`, a PIN with
+  a NUL byte `CKR_PIN_INVALID`. An empty PIN returns `CKR_PIN_LEN_RANGE`
+  unless a default PIN is configured.
+- A wrong PIN returns `CKR_FUNCTION_FAILED`, because the SDK reports a
+  rejected credential as a generic failure (SDK issue #53). It becomes
+  `CKR_PIN_INCORRECT` when the SDK names that status.
+- The token reports `CKF_TOKEN_INITIALIZED` and `CKF_USER_PIN_INITIALIZED`
+  from the start: there is no initialisation step, the first login does it.
+
+**Trust boundary.** The first `C_Login` after power-on provisions the
+partition with the configured partition ID, that login's PIN and the owner
+backup key. Every later login, from any process, must present the same
+credential until the next power cycle. So whoever opens the device node
+first after power-on chooses the credential: restrict the device node to the
+service account that runs the applications using this module.
 
 ## Testing
 
@@ -229,15 +295,19 @@ GCM/XTS output-length plan and the status maps; built with UBSan, so the
 misaligned templates and parameter blocks it feeds the decoders are real
 checks), `tests/attr_policy_test.c` (every `C_SetAttributeValue` verdict,
 per object class), `tests/mech_table_test.c` (the mechanism table against
-the dispatch arms, in both directions) and `tests/config_test.c` (the
-environment configuration). `integration-tests/cpp/` is the functional suite
+the dispatch arms, in both directions), `tests/config_test.c` (the
+environment configuration, the PIN rules and the owner backup key, built as a
+hardware build) and `tests/config_file_test.c` (the configuration file
+parser). `integration-tests/cpp/` is the functional suite
 (GoogleTest, same shape as the OpenSSL provider's): it `dlopen`s the built
 module and drives the real Cryptoki ABI: keygen including the GCM/XTS key
 families, one-shot CBC, GCM and XTS round trips, the two-call sizing
 discipline, the operation state machine and init precedence, an init path
 for every advertised mechanism, attribute changes and object sizes, key
 survival across every event that ends the device session, what `C_Logout`
-does to session objects, and the store configuration at `C_Initialize`. So
+does to session objects, the configuration at `C_Initialize`, the interface
+list, and the login rules (each login case in a process of its own, because
+the first login of a process provisions the mock partition with its PIN). So
 it needs the mock- or hardware-backed build (see the CMakeLists.txt header for
 the build/run recipe; `TSRA_PKCS11_MODULE` points it at a module,
 `TSRA_PKCS11_TEST_PIN` overrides the simulator PIN). `tests/pkcs11test/` is

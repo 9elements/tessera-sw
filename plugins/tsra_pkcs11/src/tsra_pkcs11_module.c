@@ -10,7 +10,6 @@
 #include "tsra_pkcs11_internal.h"
 
 #include <stdarg.h>
-#include <stdlib.h>
 
 tsra_pkcs11_module_t g_tsra_pkcs11 = {
     .initialized = false,
@@ -28,15 +27,12 @@ void tsra_pkcs11_unlock(void)
     pthread_mutex_unlock(&g_tsra_pkcs11.lock);
 }
 
+/* The configuration's debug setting, applied by C_Initialize. */
+static bool log_enabled = false;
+
 void tsra_pkcs11_log(const char *fmt, ...)
 {
-    static int enabled = -1;
-    if (enabled < 0)
-    {
-        const char *e = getenv("TSRA_PKCS11_DEBUG");
-        enabled = (e != NULL && e[0] == '1') ? 1 : 0;
-    }
-    if (!enabled)
+    if (!log_enabled)
     {
         return;
     }
@@ -116,18 +112,16 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     g_tsra_pkcs11.slot_count = 0;
     g_tsra_pkcs11.next_session_handle = 1;
 
-    /* Load module config (env-driven) before building the store: the persistent
-     * file backend is opt-in via TSRA_PKCS11_PERSIST and needs its root dir;
-     * unset keeps the in-memory backend, so the default path is unchanged. */
+    /* Load the configuration before building the store: the persistent file
+     * backend is opt-in and needs its root dir; without it the store stays in
+     * memory. */
     tsra_pkcs11_config cfg;
     CK_RV rv = tsra_pkcs11_config_load(&cfg);
+    log_enabled = cfg.debug;
+    g_tsra_pkcs11.default_pin = cfg.default_pin_set;
     if (rv != CKR_OK)
     {
-        TSRA_PKCS11_LOG(
-            "C_Initialize: %s is empty, contains \"..\" or is longer than %d bytes",
-            TSRA_PKCS11_ENV_STORE_DIR,
-            TSRA_PKCS11_STORE_DIR_LEN - 1
-        );
+        TSRA_PKCS11_LOG("C_Initialize: configuration refused: %s", cfg.error);
     }
     else if (cfg.store_persist)
     {
@@ -146,8 +140,8 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     {
         rv = tsra_pkcs11_objstore_mem_create(&g_tsra_pkcs11.store);
     }
-    /* The config carries credential and OBK bytes and is only needed to select
-     * and seed the store; wipe it before any return (error paths included). */
+    /* The config carries credential bytes and is only needed to select and seed
+     * the store; wipe it before any return (error paths included). */
     tsra_pkcs11_config_clear(&cfg);
     if (rv != CKR_OK)
     {

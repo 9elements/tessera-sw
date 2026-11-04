@@ -43,6 +43,7 @@ set(SOURCE
     main.cpp
     smoke_tests.cpp
     config_tests.cpp
+    interface_tests.cpp
     aes/keygen_tests.cpp
     aes/cbc_tests.cpp
     aes/gcm_tests.cpp
@@ -50,6 +51,7 @@ set(SOURCE
     aes/multipart_tests.cpp
     aes/relation_tests.cpp
     aes/survival_tests.cpp
+    session/login_tests.cpp
     session/op_lifecycle_tests.cpp
     session/logout_tests.cpp
     object/attr_tests.cpp

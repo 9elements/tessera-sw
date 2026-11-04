@@ -512,28 +512,6 @@ CK_RV C_CancelFunction(CK_SESSION_HANDLE hSession)
     return CKR_FUNCTION_NOT_PARALLEL;
 }
 
-CK_RV C_LoginUser(
-    CK_SESSION_HANDLE hSession,
-    CK_USER_TYPE userType,
-    CK_UTF8CHAR_PTR pPin,
-    CK_ULONG ulPinLen,
-    CK_UTF8CHAR_PTR pUsername,
-    CK_ULONG ulUsernameLen
-)
-{
-    if (!g_tsra_pkcs11.initialized)
-    {
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    (void)hSession;
-    (void)userType;
-    (void)pPin;
-    (void)ulPinLen;
-    (void)pUsername;
-    (void)ulUsernameLen;
-    return CKR_FUNCTION_NOT_SUPPORTED;
-}
-
 CK_RV C_MessageEncryptInit(
     CK_SESSION_HANDLE hSession,
     CK_MECHANISM_PTR pMechanism,

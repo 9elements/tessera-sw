@@ -51,12 +51,12 @@
 #define P11_FILE_TOKEN_FLAG (((CK_OBJECT_HANDLE)1) << (sizeof(CK_OBJECT_HANDLE) * 8 - 2))
 
 /* store_dir + "/slot-" + up to 20 decimal digits + NUL. */
-#define P11_FILE_TOKEN_DIR_LEN (TSRA_PKCS11_STORE_DIR_LEN + 32)
+#define P11_FILE_TOKEN_DIR_LEN (TSRA_PKCS11_PATH_LEN + 32)
 #define P11_FILE_OBJ_NAME_LEN 32
 
 typedef struct
 {
-    char store_dir[TSRA_PKCS11_STORE_DIR_LEN];
+    char store_dir[TSRA_PKCS11_PATH_LEN];
     tsra_pkcs11_objstore mem; /* embedded backend for session (CKA_TOKEN == FALSE) objects */
 } file_store;
 
