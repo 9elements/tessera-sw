@@ -9,8 +9,9 @@
 # tsra_pkcs11 --features mock; TSRA_PKCS11_MODULE overrides its path), it also
 # runs the C_Login provisioning ceremony, a pkcs11-tool AES keygen and a
 # refused pkcs11-tool key import, the gtest functional suite
-# (integration-tests/cpp) on the memory and the file object store, and the
-# pkcs11test conformance gate (tests/pkcs11test) against the simulator. The
+# (integration-tests/cpp) on the memory and the file object store, the
+# pkcs11test conformance gate (tests/pkcs11test) and the per-PR part of the
+# pkcs11-check gate (tests/pkcs11-check) against the simulator. The
 # workflow's ASan module build (functional-asan) and its libFuzzer run
 # (template-fuzz, which needs clang) are not repeated here.
 #
@@ -124,6 +125,12 @@ if [ -f "$HSMMOD" ]; then
     # lives in this checkout's target/ so two worktrees never share a clone.
     "$HERE/pkcs11test/run.sh" "$HSMMOD" "$REPO/target/pkcs11test" \
         || { echo "   (conformance gate failed)"; exit 1; }
+
+    echo; echo "== mock-backed: pkcs11-check conformance gate (PR subset) =="
+    # Installs the pinned tool into target/ on first use (needs python3 3.12
+    # and PyPI), like the workflow's per-PR step.
+    "$HERE/pkcs11-check/run.sh" --pr "$HSMMOD" "$REPO/target/pkcs11-check" \
+        || { echo "   (pkcs11-check gate failed)"; exit 1; }
 else
     echo; echo "== mock-backed checks skipped (no $HSMMOD) =="
 fi

@@ -129,6 +129,15 @@ jobs:
         run: |
           plugins/tsra_pkcs11/tests/pkcs11test/run.sh "$TSRA_PKCS11_MODULE" "$RUNNER_TEMP/pkcs11test"
 
+      # Second conformance gate: pkcs11-check, pinned by hash, on the part of
+      # its include-list that fits the per-PR budget (--pr). The whole list and
+      # the full profile run in pkcs11-nightly.yml. See
+      # plugins/tsra_pkcs11/tests/pkcs11-check/README.md.
+      - name: Conformance gate (pkcs11-check, PR subset)
+        run: |
+          plugins/tsra_pkcs11/tests/pkcs11-check/run.sh --pr "$TSRA_PKCS11_MODULE" \
+            "$RUNNER_TEMP/pkcs11-check"
+
   # Device-free unit harnesses: standalone C programs that link the module
   # sources they test (no device, no libcrypto), so they need only a compiler.
   # Every harness runs under UBSan and under ASan.

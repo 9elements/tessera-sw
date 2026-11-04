@@ -26,11 +26,13 @@ ctest --test-dir <gtest-build-dir> --output-on-failure --output-junit gtest-mem.
 TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$PWD/store" \
     ctest --test-dir <gtest-build-dir> --output-on-failure --output-junit gtest-file.xml
 plugins/tsra_pkcs11/tests/pkcs11test/run.sh "$TSRA_PKCS11_MODULE" "$PWD/pkcs11test"
+plugins/tsra_pkcs11/tests/pkcs11-check/run.sh "$TSRA_PKCS11_MODULE" "$PWD/pkcs11-check"
 ```
 
 The GoogleTest results land in the JUnit files, the pkcs11test log in
-`<work-dir>/run.log`. Any difference from the mock result is a finding, not a
-reason to change the include-list.
+`<work-dir>/run.log`, the pkcs11-check reports in `<work-dir>/run/out`. Any
+difference from the mock result is a finding, not a reason to change an
+include-list.
 
 In the GoogleTest suite a hardware-only case is named `*_hw` and starts with
 `HW_ONLY("why")`; it is skipped with that reason unless `TSRA_PKCS11_HW=1`. A

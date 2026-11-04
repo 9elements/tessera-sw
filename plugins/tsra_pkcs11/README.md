@@ -347,11 +347,25 @@ the conformance gate: it builds Google's PKCS#11 conformance program at a
 pinned revision and requires every test on its include-list to pass, on the
 memory store and again on a file store seeded with objects, which is how spec
 behaviour is kept from regressing as pieces land (the list grows with them;
-see the README there). The CI workflow
-(`.github/workflows/pkcs11.yml`) runs all of these on pushes/PRs to the
-staging branch: the unit harnesses under UBSan and under ASan
+see the README there). `tests/pkcs11-check/` is a second, independent
+conformance gate of the same kind: pkcs11-check, pinned with every dependency
+by hash, against its own include-list (see the README there). The functional
+suite also links the host's OpenSSL as an oracle (`utils/host_crypto.hpp`:
+HMAC, HKDF, AES-CBC, AES key wrap, ECDSA verification, ECDH, RSA signatures and
+OAEP, and the `CKM_RSA_AES_KEY_WRAP` blob builder), checked against published
+vectors by `host_crypto_tests.cpp`; `integration-tests/cpp/vectors/` holds
+known answers that `tools/gen_vectors.py` takes from the NIST and BoringSSL
+vectors in `crates/crypto/src/testvectors/`. The CI
+workflow (`.github/workflows/pkcs11.yml`) runs all of these on pushes/PRs to
+the staging branch: the unit harnesses under UBSan and under ASan
 (`tests/build_units.sh`), the functional suite on the memory store, on the
 file store (`TSRA_PKCS11_PERSIST=1`) and against an ASan build of the module,
-and 60 s of libFuzzer over the template decoders (`tests/template_fuzz.c`).
+60 s of libFuzzer over the template decoders (`tests/template_fuzz.c`), and
+the per-PR part of the pkcs11-check gate. `.github/workflows/pkcs11-nightly.yml`
+adds the rest: the functional suite under ASan and UBSan on both stores, the
+full pkcs11-check run against its baseline, the unfiltered pkcs11test run
+against `tests/pkcs11test/offlist.md`, pkcs11-tool thread and import-refusal
+smokes, and OpenSSL 3.5 with pkcs11-provider in front of the module
+(`tests/nightly/`).
 `tests/HARDWARE.md` lists what only a device can show, and how to run the same
 suites on one.

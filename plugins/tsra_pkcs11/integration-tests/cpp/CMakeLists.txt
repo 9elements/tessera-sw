@@ -44,6 +44,7 @@ set(SOURCE
     smoke_tests.cpp
     config_tests.cpp
     interface_tests.cpp
+    host_crypto_tests.cpp
     aes/keygen_tests.cpp
     aes/cbc_tests.cpp
     aes/gcm_tests.cpp
@@ -73,11 +74,14 @@ target_compile_definitions(
     PRIVATE TSRA_PKCS11_DEFAULT_MODULE="${TSRA_REPO_ROOT}/target/debug/tsra_pkcs11.so"
 )
 
+# The host oracle (utils/host_crypto.hpp) links the system libcrypto.
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 target_link_libraries(
     tsra_pkcs11_cpp_tests
     PRIVATE
         GTest::gtest
+        OpenSSL::Crypto
         Threads::Threads
         ${CMAKE_DL_LIBS}
 )
