@@ -44,6 +44,12 @@ the spec requires). Implemented so far:
   sets (`CKA_LOCAL`, `CKA_ALWAYS_SENSITIVE`, `CKA_NEVER_EXTRACTABLE`,
   `CKA_KEY_GEN_MECHANISM`, `CKA_UNIQUE_ID`, and `CKA_TRUSTED` TRUE, which is
   the Security Officer's: `CKR_ATTRIBUTE_READ_ONLY`).
+  An EC public key needs `CKA_EC_PARAMS` and `CKA_EC_POINT`, an RSA public
+  key `CKA_MODULUS` and `CKA_PUBLIC_EXPONENT` (`CKR_TEMPLATE_INCOMPLETE`). The
+  curve must be P-256, P-384 or P-521 (`CKR_CURVE_NOT_SUPPORTED`) and the
+  point a DER OCTET STRING holding an uncompressed point of that curve's
+  length (`CKR_ATTRIBUTE_VALUE_INVALID`); whether it lies on the curve is not
+  checked.
   `CKA_VALUE` of a sensitive key answers `CKR_ATTRIBUTE_SENSITIVE`.
   `C_SetAttributeValue` changes only the attributes PKCS#11 marks modifiable
   for the object's class (label, ID, dates, usage flags), and applies a

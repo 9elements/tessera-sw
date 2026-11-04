@@ -137,6 +137,26 @@ CK_ULONG tsra_pkcs11_ec_coord_len(tsra_pkcs11_ec_curve_t curve)
     return (c != NULL) ? c->coord_len : 0;
 }
 
+CK_RV tsra_pkcs11_ec_point_check(const void *value, CK_ULONG len, tsra_pkcs11_ec_curve_t curve)
+{
+    const curve_info *c = find_curve(curve);
+    if ((value == NULL) || (c == NULL))
+    {
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    const CK_BYTE *p = (const CK_BYTE *)value;
+    const CK_BYTE *end = p + len;
+    CK_BYTE tag = 0;
+    const CK_BYTE *point = NULL;
+    CK_ULONG point_len = 0;
+    if (!der_next(&p, end, &tag, &point, &point_len) || (tag != DER_OCTET_STRING) || (p != end) ||
+        (point_len != (1 + (2 * c->coord_len))) || (point[0] != EC_POINT_UNCOMPRESSED))
+    {
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    return CKR_OK;
+}
+
 CK_RV tsra_pkcs11_ec_point_from_spki(
     const CK_BYTE *spki,
     CK_ULONG spki_len,
