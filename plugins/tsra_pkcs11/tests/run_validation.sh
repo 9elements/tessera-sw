@@ -44,6 +44,9 @@ if [ -f "$PKCS11_TESTING/env.sh" ]; then
     # shellcheck disable=SC1091
     source "$PKCS11_TESTING/env.sh"
 fi
+# The memory store, unless a step asks for the file store: an environment
+# value wins over a persist = 1 in a TSRA_PKCS11_CONF file.
+export TSRA_PKCS11_PERSIST=0
 
 echo; echo "== pkcs11-tool: show-info / slots / mechanisms =="
 pkcs11-tool --module "$MOD" --show-info

@@ -129,7 +129,8 @@ run_gate()
 }
 
 echo "pkcs11test gate: ${#NAMES[@]} listed tests against $MOD"
-run_gate "memory store" "$WORK/run.log" -u TSRA_PKCS11_PERSIST
+# Set, not unset: a persist = 1 in TSRA_PKCS11_CONF would otherwise apply.
+run_gate "memory store" "$WORK/run.log" TSRA_PKCS11_PERSIST=0
 
 # Every process starts with an empty memory store, so the object searches and
 # listings above met nothing older than the test itself. The second run meets a

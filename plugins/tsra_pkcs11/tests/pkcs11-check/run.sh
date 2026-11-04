@@ -110,9 +110,10 @@ fi
 echo "pkcs11-check $MODE: $("$VENV/bin/pkcs11-check" version) against $MOD"
 start=$SECONDS
 set +e
+# Set, not unset: a persist = 1 in TSRA_PKCS11_CONF would otherwise apply.
 (
     cd "$RUN" &&
-        env -u TSRA_PKCS11_PERSIST P11TEST_PIN="$PIN" PKCS11_CHECK_DATA_DIR="$RUN/data" \
+        env TSRA_PKCS11_PERSIST=0 P11TEST_PIN="$PIN" PKCS11_CHECK_DATA_DIR="$RUN/data" \
             XDG_CACHE_HOME="$WORK/cache" \
             "$VENV/bin/pkcs11-check" test --module "$MOD" --slot 0 --skip-slow \
             --output json --output-file "$RUN/out/results.json" "${TARGETS[@]}"
