@@ -55,6 +55,17 @@ typedef enum
 } tsra_pkcs11_key_kind_t;
 
 /*
+ * Which device masking key encrypts a generated key's masked blob, and so how
+ * long the blob unmasks (tsra_pkcs11_key_scope_props makes the choice). Named
+ * here rather than as TSRA_KEY_PROP_ID_SESSION for the same reason as the kind.
+ */
+typedef enum
+{
+    TSRA_PKCS11_SCOPE_PARTITION = 0, /* lasts as long as the partition's provisioning */
+    TSRA_PKCS11_SCOPE_SESSION,       /* gone when the device session closes */
+} tsra_pkcs11_key_scope_t;
+
+/*
  * HSM key binding: the tsra_key_* / tsra_crypt_* half of the HSM-binding
  * layer (partition/session calls live in tsra_pkcs11_hsm.h). Like that layer it is the
  * only place these tsra_* families are called and the only place their
@@ -70,11 +81,12 @@ typedef enum
 
 /*
  * Generate an AES key of `kind` and `bit_len` bits in the device session
- * `hsm_session` and return its masked blob in a malloc'd buffer the caller
- * owns (wipe before free — it is opaque but still key-derived material). The
- * transient device handle is already freed on return. The device accepts
- * 128/192/256 bits for the plain AES kind, 256 for GCM and 512 for XTS; the
- * template layer holds that policy and this call passes it through.
+ * `hsm_session`, masked under the masking key `scope` names, and return its
+ * masked blob in a malloc'd buffer the caller owns (wipe before free: it is
+ * opaque but still key-derived material). The transient device handle is
+ * already freed on return. The device accepts 128/192/256 bits for the plain
+ * AES kind, 256 for GCM and 512 for XTS; the template layer holds that policy
+ * and this call passes it through.
  *
  * The device key always carries both encrypt and decrypt usage: the SDK
  * requires the pair on AES keys (api/lib HsmAesKey::validate_props), so a
@@ -85,6 +97,7 @@ CK_RV tsra_pkcs11_key_aes_generate(
     uint32_t hsm_session,
     tsra_pkcs11_key_kind_t kind,
     uint32_t bit_len,
+    tsra_pkcs11_key_scope_t scope,
     CK_BYTE **out_blob,
     CK_ULONG *out_blob_len
 );

@@ -68,6 +68,34 @@ inline CK_RV gen_xts_key(CK_SESSION_HANDLE s, const char *label, CK_OBJECT_HANDL
     return p11()->C_GenerateKey(s, &mech, tmpl, sizeof(tmpl) / sizeof(tmpl[0]), out);
 }
 
+/// Generate a key for the cipher `mech` (CKM_AES_CBC: AES-256, CKM_AES_GCM or
+/// CKM_AES_XTS) with explicit CKA_TOKEN and CKA_PRIVATE, so the lifetime the
+/// test relies on does not hang on a default.
+inline CK_RV gen_family_key(
+    CK_SESSION_HANDLE s,
+    CK_MECHANISM_TYPE mech,
+    CK_BBOOL token,
+    CK_BBOOL priv,
+    const char *label,
+    CK_OBJECT_HANDLE *out
+)
+{
+    CK_MECHANISM keygen = { (mech == CKM_AES_XTS) ? CKM_AES_XTS_KEY_GEN : CKM_AES_KEY_GEN,
+                            nullptr,
+                            0 };
+    CK_ULONG bytes = (mech == CKM_AES_XTS) ? 64 : 32;
+    CK_MECHANISM_TYPE gcm = CKM_AES_GCM;
+    CK_ATTRIBUTE tmpl[] = {
+        { CKA_VALUE_LEN, &bytes, sizeof(bytes) },
+        { CKA_TOKEN, &token, sizeof(token) },
+        { CKA_PRIVATE, &priv, sizeof(priv) },
+        { CKA_LABEL, const_cast<char *>(label), static_cast<CK_ULONG>(std::strlen(label)) },
+        { CKA_ALLOWED_MECHANISMS, &gcm, sizeof(gcm) }, /* GCM keys only (see gen_gcm_key) */
+    };
+    CK_ULONG n = (sizeof(tmpl) / sizeof(tmpl[0])) - ((mech == CKM_AES_GCM) ? 0 : 1);
+    return p11()->C_GenerateKey(s, &keygen, tmpl, n, out);
+}
+
 /// Read a key's CKA_ALLOWED_MECHANISMS (two-call sizing) into `out`.
 inline CK_RV get_allowed_mechs(
     CK_SESSION_HANDLE s,

@@ -55,6 +55,14 @@ class SurvivingKey
         ASSERT_FALSE(c0_.empty());
     }
 
+    /// Check through session `s` and key handle `key` from now on: an event
+    /// that closes the session or re-initializes the module hands out new ones.
+    void rebind(CK_SESSION_HANDLE s, CK_OBJECT_HANDLE key)
+    {
+        s_ = s;
+        key_ = key;
+    }
+
     /// The key still encrypts the message to c0 after `event`. ASSERTs, so call
     /// it as ASSERT_NO_FATAL_FAILURE(k.check("...")).
     void check(const char *event)

@@ -473,18 +473,20 @@ TEST_F(aes_cbc, wrong_key_never_recovers_the_plaintext)
 
 TEST_F(aes_cbc, logout_tears_down_the_active_operation)
 {
-    SurvivingKey survivor(s_, key_, CKM_AES_CBC);
+    // A public session key outlives the logout; a private one would not.
+    CK_OBJECT_HANDLE pub = 0;
+    ASSERT_CKR_OK(gen_family_key(s_, CKM_AES_CBC, CK_FALSE, CK_FALSE, "cbc-public", &pub));
+    SurvivingKey survivor(s_, pub, CKM_AES_CBC);
     ASSERT_NO_FATAL_FAILURE(survivor.record());
-    ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &pad_, key_));
+    ASSERT_CKR_OK(p11()->C_EncryptInit(s_, &pad_, pub));
     ASSERT_CKR_OK(p11()->C_Logout(s_));
     CK_ULONG need = 0;
     EXPECT_CKR(
         CKR_OPERATION_NOT_INITIALIZED,
         p11()->C_Encrypt(s_, plain_.data(), 16, nullptr, &need)
     );
-    EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, p11()->C_EncryptInit(s_, &pad_, key_));
-    GTEST_SKIP() << "B1: the key's blob dies with the device session at C_Logout";
-    // The public session key outlives the logout, and it is still the same key.
+    EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, p11()->C_EncryptInit(s_, &pad_, pub));
+    // The key is still the same key after the next login.
     ASSERT_CKR_OK(login_user(s_));
     ASSERT_NO_FATAL_FAILURE(survivor.check("a logout and login"));
 }
@@ -533,14 +535,15 @@ TEST_F(aes_cbc, every_termination_path_gives_the_device_key_back)
               ASSERT_CKR_OK(p11()->C_CloseSession(other));
           } },
     };
-    // Each fresh operation brings a key of its own: the fixture key does not
-    // outlive the gate's logout yet (B1).
-    auto fresh = [&] {
-        CK_OBJECT_HANDLE k = 0;
-        CK_RV rv = gen_aes_key(s_, 32, CK_TRUE, CK_TRUE, "leak-gate-fresh", &k);
-        return (rv == CKR_OK) ? crypt_oneshot(s_, true, &pad_, k, plain_, out) : rv;
-    };
+    // The fresh operation runs on a public key, which outlives the gate's
+    // logout and must still be the same key after it.
+    CK_OBJECT_HANDLE pub = 0;
+    ASSERT_CKR_OK(gen_family_key(s_, CKM_AES_CBC, CK_FALSE, CK_FALSE, "leak-gate", &pub));
+    SurvivingKey survivor(s_, pub, CKM_AES_CBC);
+    ASSERT_NO_FATAL_FAILURE(survivor.record());
+    auto fresh = [&] { return crypt_oneshot(s_, true, &pad_, pub, plain_, out); };
     ASSERT_NO_FATAL_FAILURE(leak_gate(s_, paths, fresh));
+    ASSERT_NO_FATAL_FAILURE(survivor.check("the leak gate"));
 }
 
 TEST_F(aes_cbc, closing_a_session_with_an_active_operation_is_clean)

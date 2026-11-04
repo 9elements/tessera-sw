@@ -463,6 +463,13 @@ CK_RV tsra_pkcs11_keygen_build_template(
     return CKR_OK;
 }
 
+tsra_pkcs11_key_scope_t tsra_pkcs11_key_scope_props(CK_BBOOL ck_token, CK_BBOOL ck_private)
+{
+    (void)ck_token;
+    (void)ck_private;
+    return TSRA_PKCS11_SCOPE_PARTITION;
+}
+
 /* ========================================================================= */
 /* Cipher mechanism policy                                                   */
 /* ========================================================================= */

@@ -4,8 +4,9 @@
 #
 # Conformance gate: builds Google pkcs11test at a pinned revision (with the
 # login-profile fixture patch), runs it against the given module and requires
-# every test named in include-list.txt to pass — and to have actually run.
-# See README.md alongside.
+# every test named in include-list.txt to pass and to have actually run, once
+# on the memory object store and once on a file store seeded with objects
+# (seed_store.c). See README.md alongside.
 #
 #   run.sh <module.so> [work-dir]
 #
@@ -17,6 +18,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN="$(cd "$HERE/../.." && pwd)"
 MOD="${1:?usage: $0 <module.so> [work-dir]}"
 WORK="${2:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/tsra-pkcs11test}"
 REPO="${PKCS11TEST_REPO:-https://github.com/google/pkcs11test.git}"
@@ -70,49 +72,74 @@ git -C "$SRC" apply "$PATCH" ||
 make -C "$SRC" -s -j"$(nproc 2>/dev/null || echo 2)" > "$WORK/build.log" 2>&1 ||
     { tail -n 30 "$WORK/build.log"; fail "build failed (see $WORK/build.log)"; }
 
-# --- 4. Run exactly the include-list ---------------------------------------
+# --- 4. Run exactly the include-list, twice ---------------------------------
 FILTER="$(IFS=:; echo "${NAMES[*]}")"
+
+# run_gate <label> <log> [env arguments...]: run the listed tests under
+# env(1) with those arguments, and fail unless every one of them passed, ran
+# and actually asserted something.
+run_gate()
+{
+    local label="$1" log="$2" status
+    shift 2
+    set +e
+    (
+        cd "$SRC" &&
+            env "$@" ./pkcs11test -m "$(basename "$MOD")" -l "$(dirname "$MOD")" -s 0 -u "$PIN" -X \
+                --gtest_filter="$FILTER"
+    ) > "$log" 2>&1
+    status=$?
+    set -e
+
+    grep -E '^\[  FAILED  \] |^\[  PASSED  \] ' "$log" || true
+    if [ "$status" -ne 0 ]; then
+        # The job log is all a CI run leaves behind, so put the assertions in it.
+        echo "--- pkcs11test output ($label) ---" >&2
+        cat "$log" >&2
+        fail "$label: listed tests failed (pkcs11test exited $status)"
+    fi
+
+    # A filter that matches nothing is a pass as far as GoogleTest is
+    # concerned, so every listed test must be accounted for by name.
+    comm -13 \
+        <(grep -E '^\[ RUN      \] ' "$log" | sed -E 's/^\[ RUN      \] //' | sort -u) \
+        <(printf '%s\n' "${NAMES[@]}") > "$WORK/missing.txt"
+    if [ -s "$WORK/missing.txt" ]; then
+        echo "--- listed but never run (renamed or removed upstream?) ---" >&2
+        cat "$WORK/missing.txt" >&2
+        fail "$label: $(wc -l < "$WORK/missing.txt") listed test(s) did not run"
+    fi
+
+    # pkcs11test's own skip mechanism does NOT mark a case skipped for
+    # GoogleTest: the body returns early and the case still reports OK. Such a
+    # test asserts nothing, so it must not sit on the list pretending to be a
+    # check.
+    comm -12 \
+        <(awk '/^Following tests were skipped/ { f = 1; next }
+               /^\[/ { f = 0 }
+               f && NF { sub(/^ +/, ""); print }' "$log" | sort -u) \
+        <(printf '%s\n' "${NAMES[@]}") > "$WORK/skipped.txt"
+    if [ -s "$WORK/skipped.txt" ]; then
+        echo "--- listed but skipped inside pkcs11test (asserted nothing) ---" >&2
+        cat "$WORK/skipped.txt" >&2
+        fail "$label: $(wc -l < "$WORK/skipped.txt") listed test(s) were skipped, not executed"
+    fi
+}
+
 echo "pkcs11test gate: ${#NAMES[@]} listed tests against $MOD"
-set +e
-(
-    cd "$SRC" &&
-        ./pkcs11test -m "$(basename "$MOD")" -l "$(dirname "$MOD")" -s 0 -u "$PIN" -X \
-            --gtest_filter="$FILTER"
-) > "$WORK/run.log" 2>&1
-status=$?
-set -e
+run_gate "memory store" "$WORK/run.log" -u TSRA_PKCS11_PERSIST
 
-grep -E '^\[  FAILED  \] |^\[  PASSED  \] ' "$WORK/run.log" || true
-if [ "$status" -ne 0 ]; then
-    # The job log is all a CI run leaves behind, so put the assertions in it.
-    echo "--- pkcs11test output ---" >&2
-    cat "$WORK/run.log" >&2
-    fail "listed tests failed (pkcs11test exited $status)"
-fi
+# Every process starts with an empty memory store, so the object searches and
+# listings above met nothing older than the test itself. The second run meets a
+# file store that already holds a public and a private data object and a key.
+STORE="$(cd "$WORK" && pwd)/store" # absolute: the gate runs from inside the clone
+rm -rf "$STORE" # not pre-created: the module creates it owner-only
+gcc -Wall -Wextra -Werror -I"$PLUGIN/include/pkcs11-v3.1" -I"$PLUGIN/src" \
+    "$HERE/seed_store.c" -o "$WORK/seed_store" -ldl || fail "cannot build the store seeder"
+TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$STORE" "$WORK/seed_store" "$MOD" "$PIN" ||
+    fail "cannot seed the file store $STORE"
+echo "pkcs11test gate: the same tests on a populated file store"
+run_gate "populated file store" "$WORK/run-persist.log" \
+    TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$STORE"
 
-# A filter that matches nothing is a pass as far as GoogleTest is concerned, so
-# every listed test must be accounted for by name.
-comm -13 \
-    <(grep -E '^\[ RUN      \] ' "$WORK/run.log" | sed -E 's/^\[ RUN      \] //' | sort -u) \
-    <(printf '%s\n' "${NAMES[@]}") > "$WORK/missing.txt"
-if [ -s "$WORK/missing.txt" ]; then
-    echo "--- listed but never run (renamed or removed upstream?) ---" >&2
-    cat "$WORK/missing.txt" >&2
-    fail "$(wc -l < "$WORK/missing.txt") listed test(s) did not run"
-fi
-
-# pkcs11test's own skip mechanism does NOT mark a case skipped for GoogleTest:
-# the body returns early and the case still reports OK. Such a test asserts
-# nothing, so it must not sit on the list pretending to be a check.
-comm -12 \
-    <(awk '/^Following tests were skipped/ { f = 1; next }
-           /^\[/ { f = 0 }
-           f && NF { sub(/^ +/, ""); print }' "$WORK/run.log" | sort -u) \
-    <(printf '%s\n' "${NAMES[@]}") > "$WORK/skipped.txt"
-if [ -s "$WORK/skipped.txt" ]; then
-    echo "--- listed but skipped inside pkcs11test (asserted nothing) ---" >&2
-    cat "$WORK/skipped.txt" >&2
-    fail "$(wc -l < "$WORK/skipped.txt") listed test(s) were skipped, not executed"
-fi
-
-echo "pkcs11test gate: all ${#NAMES[@]} listed tests passed"
+echo "pkcs11test gate: all ${#NAMES[@]} listed tests passed on both stores"

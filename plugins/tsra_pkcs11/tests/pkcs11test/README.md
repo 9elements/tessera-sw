@@ -20,7 +20,13 @@ requests into the staging branch.
 3. runs it against the module with `-s 0 -u <pin> -X` and
    `--gtest_filter=<every name in include-list.txt>`,
 4. fails unless **every listed test passed, ran, and actually asserted
-   something**.
+   something**,
+5. seeds a file object store with `seed_store.c` (a public and a private
+   token data object and a token AES key, in a directory the module creates)
+   and runs the same list again with `TSRA_PKCS11_PERSIST=1`, under the same
+   conditions. Each process starts with an empty memory store, so only this
+   run makes the object searches and listings meet objects the test did not
+   create itself.
 
 That third condition is not pedantry. GoogleTest exits 0 when a filter matches
 nothing, so a test renamed upstream would silently stop being checked; and
@@ -123,14 +129,11 @@ with `CKR_FUNCTION_FAILED`, because the SDK reports a rejected credential as a
 generic failure, so `UserLoginWrongPIN` (which wants `CKR_PIN_INCORRECT`)
 stays off the list until the SDK names that status.
 
-A generated key does not yet outlive the device session it was generated in:
-after `C_Logout`, the close of the slot's last session, `C_CloseAllSessions`
-or `C_Finalize` its masked blob no longer unmasks (`CKR_KEY_HANDLE_INVALID`),
-within one process as much as across processes. Across processes the mock
-adds a second cause: every process provisions its partition afresh, so a key
-from another process can only unmask once the provisioning material persists.
-The gate also runs against the in-memory object store only; the persistent
-backend (`TSRA_PKCS11_PERSIST=1`) has unit tests but no conformance run.
+No listed test uses a key after its device session ended; key survival
+within a process is covered by the GoogleTest suite (`key_survival.*`). The
+seeded key of the second run is only found and listed, never used: on the
+mock every process provisions its partition afresh, so a key from another
+process does not unmask there (`CKR_KEY_HANDLE_INVALID`).
 
 ## Running it locally
 

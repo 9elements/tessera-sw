@@ -153,11 +153,9 @@ void tsra_pkcs11_session_destroy_owned(tsra_pkcs11_session_t *s)
     }
     for (CK_ULONG i = 0; i < s->owned_count; i++)
     {
-        /* A session reaps its own objects whatever the login state is: a
-         * C_Logout since they were created would hide the private ones from a
-         * logged-out destroy, hence CK_TRUE. An object a sibling session
-         * destroyed meanwhile is simply gone — store handles are never reused,
-         * so nothing else can be hit. */
+        /* A session reaps its own objects whatever the login state is, hence
+         * CK_TRUE. An object a sibling session destroyed meanwhile is simply
+         * gone: store handles are never reused, so nothing else can be hit. */
         (void
         )g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, s->owned[i]);
     }
@@ -165,6 +163,29 @@ void tsra_pkcs11_session_destroy_owned(tsra_pkcs11_session_t *s)
     s->owned = NULL;
     s->owned_count = 0;
     s->owned_cap = 0;
+}
+
+/* The C_Logout rule: destroy the private session objects `s` owns and keep
+ * the public ones. */
+static void destroy_private_owned(tsra_pkcs11_session_t *s)
+{
+    CK_ULONG kept = 0;
+    for (CK_ULONG i = 0; i < s->owned_count; i++)
+    {
+        CK_OBJECT_HANDLE h = s->owned[i];
+        /* Private as the store judges it: hidden from a logged-out caller. */
+        CK_RV seen = g_tsra_pkcs11.store.ops
+                         ->get_attr(g_tsra_pkcs11.store.ctx, s->slot, CK_FALSE, h, NULL, 0);
+        if (seen == CKR_OBJECT_HANDLE_INVALID)
+        {
+            (void)g_tsra_pkcs11.store.ops->destroy(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h);
+        }
+        else
+        {
+            s->owned[kept++] = h;
+        }
+    }
+    s->owned_count = kept;
 }
 
 /* ========================================================================= */
@@ -433,15 +454,20 @@ CK_RV C_Logout(CK_SESSION_HANDLE hSession)
     }
     /* Logout closes the token's device session, and cipher operations hold
      * device key handles scoped to it: release them first, while the session
-     * they belong to is still alive. */
+     * they belong to is still alive. A search collected its handles while
+     * logged in, so it ends too, or it would hand out private ones. */
     for (size_t i = 0; i < TSRA_PKCS11_MAX_SESSIONS; i++)
     {
         tsra_pkcs11_session_t *t = &g_tsra_pkcs11.sessions[i];
-        if (t->in_use && (t->slot == s->slot) &&
-            ((t->op == P11_OP_ENCRYPT) || (t->op == P11_OP_DECRYPT)))
+        if (!t->in_use || (t->slot != s->slot))
+        {
+            continue;
+        }
+        if ((t->op == P11_OP_ENCRYPT) || (t->op == P11_OP_DECRYPT) || (t->op == P11_OP_FIND))
         {
             tsra_pkcs11_session_reset_op(t);
         }
+        destroy_private_owned(t);
     }
     /* Login is token-wide, so log the token out regardless of which session
      * calls C_Logout — including one that never called C_Login itself. */

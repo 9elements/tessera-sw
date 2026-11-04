@@ -51,6 +51,7 @@ set(SOURCE
     aes/relation_tests.cpp
     aes/survival_tests.cpp
     session/op_lifecycle_tests.cpp
+    session/logout_tests.cpp
     object/attr_tests.cpp
     object/persist_tests.cpp
 )

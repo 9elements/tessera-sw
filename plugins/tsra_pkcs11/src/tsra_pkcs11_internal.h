@@ -95,9 +95,9 @@ typedef struct
 
     /*
      * Session objects (CKA_TOKEN = FALSE) this session created. C_CloseSession
-     * destroys them with the session, and the object store knows nothing about
-     * sessions, so the framework keeps the list: grown on demand, drained and
-     * freed when the session closes.
+     * destroys them with the session, C_Logout the private ones, and the object
+     * store knows nothing about sessions, so the framework keeps the list: grown
+     * on demand, drained and freed when the session closes.
      */
     CK_OBJECT_HANDLE *owned;
     CK_ULONG owned_count;

@@ -48,9 +48,9 @@ and the result of the last hardware run.
 - Expect: the same ciphertexts after the login. Round trips only, until keys
   can be imported for known-answer tests. Firmware older than the key
   generation enablement fails at key generation.
-- Cases: `key_survival.*`, `aes_cbc.logout_tears_down_the_active_operation`
-  (skipped while B1 is open: the key blob dies with the device session at
-  `C_Logout`).
+- Cases: `key_survival.*`, `key_survival_persist.after_finalize_initialize`,
+  `logout.public_session_object_survives_logout`,
+  `aes_cbc.logout_tears_down_the_active_operation`.
 - Result: not run yet.
 
 ### H-b Provisioning through C_Login on a fresh partition

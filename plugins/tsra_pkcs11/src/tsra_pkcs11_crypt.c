@@ -162,6 +162,11 @@ CK_RV C_GenerateKey(
         return rv;
     }
 
+    /* An absent or malformed CKA_PRIVATE reads as public, the store's default;
+     * the scope does not depend on it. */
+    CK_BBOOL priv = CK_FALSE;
+    (void)tsra_pkcs11_tmpl_bool(tsra_pkcs11_tmpl_find(pTemplate, ulCount, CKA_PRIVATE), &priv);
+
     CK_BYTE *blob = NULL;
     CK_ULONG blob_len = 0;
     CK_ATTRIBUTE *full = NULL;
@@ -169,6 +174,7 @@ CK_RV C_GenerateKey(
         slot->hsm_session,
         policy->kind,
         (uint32_t)(value_len * AES_KEY_BITS_PER_BYTE),
+        tsra_pkcs11_key_scope_props(token, priv),
         &blob,
         &blob_len
     );

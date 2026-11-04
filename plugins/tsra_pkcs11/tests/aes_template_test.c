@@ -16,10 +16,10 @@
  * non-AES key types, wrong value sizes, NULL values, duplicates, the length
  * ceiling, first-failure-wins ordering), the key-family selection between
  * plain AES, GCM (by CKA_ALLOWED_MECHANISMS) and XTS, the append-if-absent
- * rules of tsra_pkcs11_keygen_build_template, the cipher mechanism table,
- * the allowed-mechanism gate, CK_GCM_PARAMS decoding, the GCM/XTS output
- * length plan, the multi-part length rules, and the status maps including the
- * padded-decrypt remap.
+ * rules of tsra_pkcs11_keygen_build_template, the key scope rule, the cipher
+ * mechanism table, the allowed-mechanism gate, CK_GCM_PARAMS decoding, the
+ * GCM/XTS output length plan, the multi-part length rules, and the status maps
+ * including the padded-decrypt remap.
  */
 
 #include "tsra_pkcs11_status.h"
@@ -762,6 +762,30 @@ static void test_build(void)
     );
 }
 
+static void test_key_scope(void)
+{
+    printf("== key scope: the partition for every object ==\n");
+    const CK_BBOOL values[] = { CK_FALSE, CK_TRUE };
+    for (size_t t = 0; t < COUNT(values); t++)
+    {
+        for (size_t p = 0; p < COUNT(values); p++)
+        {
+            char msg[80];
+            snprintf(
+                msg,
+                sizeof(msg),
+                "CKA_TOKEN=%u CKA_PRIVATE=%u -> partition scope",
+                (unsigned)values[t],
+                (unsigned)values[p]
+            );
+            CHECK(
+                tsra_pkcs11_key_scope_props(values[t], values[p]) == TSRA_PKCS11_SCOPE_PARTITION,
+                msg
+            );
+        }
+    }
+}
+
 static void test_status_maps(void)
 {
     printf("== status maps ==\n");
@@ -1501,6 +1525,7 @@ int main(void)
     test_check_reject();
     test_check_order();
     test_build();
+    test_key_scope();
     test_families();
     test_cipher_mechs();
     test_gcm_params();

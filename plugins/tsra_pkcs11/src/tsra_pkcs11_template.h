@@ -169,6 +169,19 @@ CK_RV tsra_pkcs11_keygen_build_template(
 );
 
 /*
+ * The masking scope of the device key behind a key object with CKA_TOKEN
+ * `ck_token` and CKA_PRIVATE `ck_private`: the partition, for every object.
+ * The module opens one device session per login and closes it at C_Logout,
+ * at the close of the slot's last session, at C_CloseAllSessions and at
+ * C_Finalize, so a blob masked under the device session's key would stop
+ * unmasking at each of those, whatever the object's PKCS#11 lifetime. That
+ * lifetime is the module's alone: the session's owned-object list, C_Logout
+ * and C_DestroyObject. Every key the device creates takes its scope from here;
+ * both attributes are parameters so the rule is pinned for each combination.
+ */
+tsra_pkcs11_key_scope_t tsra_pkcs11_key_scope_props(CK_BBOOL ck_token, CK_BBOOL ck_private);
+
+/*
  * The cipher mechanisms and what each needs from a key: the device kind to
  * unmask the blob as, and the CKA_KEY_TYPE the key object must carry.
  */

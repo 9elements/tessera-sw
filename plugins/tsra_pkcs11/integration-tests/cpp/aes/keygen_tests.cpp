@@ -18,6 +18,7 @@
 #include "tsra_pkcs11_template.h"
 #include "utils/aes_helpers.hpp"
 #include "utils/module.hpp"
+#include "utils/surviving_key.hpp"
 
 namespace
 {
@@ -375,10 +376,12 @@ TEST_F(aes_keygen, token_object_survives_its_session)
     );
     CK_OBJECT_HANDLE key = 0;
     ASSERT_CKR_OK(keygen_with(other, { CKA_TOKEN, &g_true, sizeof(g_true) }, &key));
+    SurvivingKey survivor(other, key, CKM_AES_CBC);
+    ASSERT_NO_FATAL_FAILURE(survivor.record());
     ASSERT_CKR_OK(p11()->C_CloseSession(other));
-    CK_ULONG vlen = 0;
-    EXPECT_CKR_OK(get_attr(s_, key, CKA_VALUE_LEN, &vlen));
-    EXPECT_EQ(32u, vlen);
+    // This session keeps the login, so only the PKCS#11 session ended.
+    survivor.rebind(s_, key);
+    EXPECT_NO_FATAL_FAILURE(survivor.check("closing the session that made it"));
     // Leave the token store as we found it.
     EXPECT_CKR_OK(p11()->C_DestroyObject(s_, key));
 }

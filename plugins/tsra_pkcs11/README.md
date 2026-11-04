@@ -32,9 +32,9 @@ the spec requires). Implemented so far:
   `CKA_SENSITIVE` can only become TRUE and `CKA_EXTRACTABLE` only FALSE.
   `C_GetObjectSize` reports the bytes of the attribute values plus the masked
   key body. `C_CopyObject` is not implemented.
-  A session object is destroyed when the session that created it closes;
-  token objects outlive it. (`C_Logout` does not yet destroy private session
-  objects — it only hides them until the next login.)
+  A session object is destroyed when the session that created it closes, a
+  private one also at `C_Logout`; token objects outlive both (see Key storage
+  and key lifetime).
 - **`C_Digest*` (SHA-1/256/384/512)** — host-side digests (one-shot and
   multi-part); every other digest mechanism returns `CKR_MECHANISM_INVALID`.
 - **`C_GenerateKey` (`CKM_AES_KEY_GEN`, `CKM_AES_XTS_KEY_GEN`)** — generates a
@@ -57,8 +57,8 @@ the spec requires). Implemented so far:
   reason).
 - **`C_Encrypt` / `C_Decrypt` one-shot (`CKM_AES_CBC`, `CKM_AES_CBC_PAD`,
   `CKM_AES_GCM`, `CKM_AES_XTS`)** — each `C_EncryptInit`/`C_DecryptInit`
-  unmasks the stored blob into a fresh session-scoped device key that lives
-  exactly as long as the operation; a key serves only its own family. Input and
+  unmasks the stored blob into a fresh device key that lives exactly as long
+  as the operation; a key serves only its own family. Input and
   output may be the same buffer; the binding stages the input whenever the two
   ranges overlap, because the native API cannot hold a read and a write slice
   over the same bytes.
@@ -117,6 +117,51 @@ the spec requires). Implemented so far:
   integer, must be below 2^64 - 1: its upper 8 bytes zero and its lower 8 not
   all 0xFF, so the device can advance it past the data unit. Any other tweak
   returns `CKR_MECHANISM_PARAM_INVALID`, where PKCS#11 allows any 16 bytes.
+
+## Key storage and key lifetime
+
+The TSRA device keeps no keys. When it generates a key, it returns the key
+encrypted under a masking key that never leaves the device: the masked blob.
+The masked blob is the key's only durable form. The module stores it as the
+key body of the PKCS#11 object, in memory or, with `TSRA_PKCS11_PERSIST=1`, in
+the file store.
+
+For every operation the module sends the masked blob to the device, which
+unmasks it into a temporary device key. The module deletes that device key
+when the operation ends, whatever the outcome. No device key outlives an
+operation.
+
+Which masking key encrypts the masked blob is chosen when the key is
+generated. The device offers two: the masking key of the current device
+session, which is gone when that device session closes, and the masking key
+of the partition, which lasts as long as the partition's provisioning. The
+module always uses the partition masking key, for token and session objects
+alike: it passes `TSRA_KEY_PROP_ID_SESSION` as false. The module opens one
+device session per login and closes it at `C_Logout`, when the slot's last
+PKCS#11 session closes, at `C_CloseAllSessions` and at `C_Finalize`. With the
+device-session masking key every key would become unusable at each of those
+points, whatever its PKCS#11 lifetime.
+
+PKCS#11 object lifetime is therefore managed by the module alone, as the
+specification describes it:
+
+| Object | Destroyed when |
+|---|---|
+| session object | the PKCS#11 session that created it closes (`C_CloseSession`, `C_CloseAllSessions`, `C_Finalize`) |
+| private session object | also at `C_Logout`, whichever session of the slot calls it |
+| token object | `C_DestroyObject`, and with the memory store `C_Finalize` |
+
+What a token key survives:
+
+- `C_Logout` and `C_Login`, the close of the slot's last session, and
+  `C_CloseAllSessions`: yes. `C_Finalize` and `C_Initialize` in the same
+  process: yes, with the file store.
+- Another process on the same device: not shown yet. The mock simulator
+  provisions every process from scratch, so a key from another process does
+  not unmask there (`CKR_KEY_HANDLE_INVALID`). Hardware checklist item H-d.
+- A power cycle or a partition reset: no, not until the module replays the
+  partition's backup masking key at re-provisioning. Hardware checklist item
+  H-e.
 
 ## Layering
 
@@ -190,15 +235,17 @@ environment configuration). `integration-tests/cpp/` is the functional suite
 module and drives the real Cryptoki ABI: keygen including the GCM/XTS key
 families, one-shot CBC, GCM and XTS round trips, the two-call sizing
 discipline, the operation state machine and init precedence, an init path
-for every advertised mechanism, attribute changes and object sizes, and the
-store configuration at `C_Initialize`. So it needs the mock- or
-hardware-backed build (see the CMakeLists.txt header for
+for every advertised mechanism, attribute changes and object sizes, key
+survival across every event that ends the device session, what `C_Logout`
+does to session objects, and the store configuration at `C_Initialize`. So
+it needs the mock- or hardware-backed build (see the CMakeLists.txt header for
 the build/run recipe; `TSRA_PKCS11_MODULE` points it at a module,
 `TSRA_PKCS11_TEST_PIN` overrides the simulator PIN). `tests/pkcs11test/` is
 the conformance gate: it builds Google's PKCS#11 conformance program at a
-pinned revision and requires every test on its include-list to pass, which is
-how spec behaviour is kept from regressing as pieces land (the list grows with
-them — see the README there). The CI workflow
+pinned revision and requires every test on its include-list to pass, on the
+memory store and again on a file store seeded with objects, which is how spec
+behaviour is kept from regressing as pieces land (the list grows with them;
+see the README there). The CI workflow
 (`.github/workflows/pkcs11.yml`) runs all of these on pushes/PRs to the
 staging branch: the unit harnesses under UBSan and under ASan
 (`tests/build_units.sh`), and the functional suite on the memory store, on the

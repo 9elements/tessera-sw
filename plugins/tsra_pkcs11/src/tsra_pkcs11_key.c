@@ -114,11 +114,13 @@ CK_RV tsra_pkcs11_key_aes_generate(
     uint32_t hsm_session,
     tsra_pkcs11_key_kind_t kind,
     uint32_t bit_len,
+    tsra_pkcs11_key_scope_t scope,
     CK_BYTE **out_blob,
     CK_ULONG *out_blob_len
 )
 {
-    if ((out_blob == NULL) || (out_blob_len == NULL))
+    if ((out_blob == NULL) || (out_blob_len == NULL) ||
+        ((scope != TSRA_PKCS11_SCOPE_PARTITION) && (scope != TSRA_PKCS11_SCOPE_SESSION)))
     {
         return CKR_ARGUMENTS_BAD;
     }
@@ -134,19 +136,19 @@ CK_RV tsra_pkcs11_key_aes_generate(
     /*
      * SENSITIVE / EXTRACTABLE / LOCAL are deliberately absent: the SDK rejects
      * them as inputs (it sets them itself), which is why the template
-     * normaliser in tsra_pkcs11_template.c strips them before this call. SESSION is
-     * always true — device residence is per-session by design here; the masked
-     * blob below is what persists. ENCRYPT and DECRYPT are always both set:
-     * the SDK refuses an AES, GCM or XTS key with only one of them (see the
-     * header note).
+     * normaliser in tsra_pkcs11_template.c strips them before this call. SESSION
+     * picks the masking key, so it is passed either way. ENCRYPT and DECRYPT
+     * are always both set: the SDK refuses an AES, GCM or XTS key with only one
+     * of them (see the header note).
      */
     uint32_t class_secret = TSRA_KEY_CLASS_SECRET;
     uint8_t yes = 1;
+    uint8_t session = (scope == TSRA_PKCS11_SCOPE_SESSION) ? 1 : 0;
     struct tsra_key_prop props[] = {
         { TSRA_KEY_PROP_ID_CLASS, &class_secret, sizeof(class_secret) },
         { TSRA_KEY_PROP_ID_KIND, &dev_kind, sizeof(dev_kind) },
         { TSRA_KEY_PROP_ID_BIT_LEN, &bit_len, sizeof(bit_len) },
-        { TSRA_KEY_PROP_ID_SESSION, &yes, sizeof(yes) },
+        { TSRA_KEY_PROP_ID_SESSION, &session, sizeof(session) },
         { TSRA_KEY_PROP_ID_ENCRYPT, &yes, sizeof(yes) },
         { TSRA_KEY_PROP_ID_DECRYPT, &yes, sizeof(yes) },
     };
@@ -632,6 +634,7 @@ CK_RV tsra_pkcs11_key_aes_generate(
     uint32_t hsm_session,
     tsra_pkcs11_key_kind_t kind,
     uint32_t bit_len,
+    tsra_pkcs11_key_scope_t scope,
     CK_BYTE **out_blob,
     CK_ULONG *out_blob_len
 )
@@ -639,6 +642,7 @@ CK_RV tsra_pkcs11_key_aes_generate(
     (void)hsm_session;
     (void)kind;
     (void)bit_len;
+    (void)scope;
     (void)out_blob;
     (void)out_blob_len;
     return CKR_FUNCTION_NOT_SUPPORTED;
