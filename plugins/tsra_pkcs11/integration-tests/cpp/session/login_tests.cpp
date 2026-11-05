@@ -3,7 +3,7 @@
 
 /// @file login_tests.cpp
 ///
-/// C_Login on a token with one user (ADR-0014, ADR-0033), positive and
+/// C_Login on a token with one user, positive and
 /// negative: the PIN rules, the default PIN, the user types, the token flags,
 /// the owner backup key read at every login and the token-wide login state.
 /// The first login of a process provisions the mock partition with its PIN,

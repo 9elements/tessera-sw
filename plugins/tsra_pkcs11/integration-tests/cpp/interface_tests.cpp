@@ -3,7 +3,7 @@
 
 /// @file interface_tests.cpp
 ///
-/// The interfaces the module offers (ADR-0015): "PKCS 11" 3.1, 3.0 and 2.40,
+/// The interfaces the module offers: "PKCS 11" 3.1, 3.0 and 2.40,
 /// in that order, 3.1 the default; lookups by version and flags; two-call
 /// sizing of the list; C_GetFunctionList handing out the 2.40 table; and
 /// C_LoginUser, which is C_Login with the username ignored.
