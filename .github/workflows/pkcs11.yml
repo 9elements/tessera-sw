@@ -3,20 +3,21 @@
 
 # PKCS#11 module integration check.
 #
-# Runs on PRs into the feature/pkcs11 staging branch (where the module is
-# developed until it merges to main) and into feat/pkcs11-* piece branches
-# (stacked PRs), on pushes to the staging branch, and on manual dispatch.
+# Runs on PRs into main that touch the module or this workflow, on PRs into
+# the feature/pkcs11 staging branch while it still exists, and on manual
+# dispatch. Changes elsewhere that could break the module (SDK, toolchain) are
+# caught by pkcs11-nightly.yml, which runs from main.
 # Unimplemented entry points return CKR_FUNCTION_NOT_SUPPORTED; the drive
 # covers init/login, host objects, the SHA digests, and AES keygen with CBC,
 # GCM and XTS. Build output goes to $RUNNER_TEMP, never into the checkout.
-# Add main to the triggers when the staging branch merges.
 name: pkcs11
 
 on:
-  push:
-    branches: [ feature/pkcs11 ]
   pull_request:
-    branches: [ feature/pkcs11, 'feat/pkcs11-*' ]
+    branches: [ main, feature/pkcs11 ]
+    paths:
+      - 'plugins/tsra_pkcs11/**'
+      - '.github/workflows/pkcs11.yml'
   workflow_dispatch:
 
 env:
