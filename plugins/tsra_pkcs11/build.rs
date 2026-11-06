@@ -12,8 +12,8 @@ fn main() {
     use std::path::PathBuf;
 
     let mut features = Vec::new();
-    if env::var("CARGO_FEATURE_MOCK").is_ok() {
-        features.push("mock");
+    if env::var("CARGO_FEATURE_EMU").is_ok() {
+        features.push("emu");
     }
 
     // OUT_DIR is target/<profile>/build/<crate-hash>/out; go up 3 to <profile>.

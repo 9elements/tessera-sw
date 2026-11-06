@@ -56,7 +56,7 @@ Flags: `-X` disables the Security Officer tests (this token has no SO
 credential — the TSRA DDI has none); `-I` (token initialisation) is not
 needed because `C_Login` provisions the partition lazily.
 
-The gate drives the **mock-backed** module (`cargo build --features mock`), not
+The gate drives the **emulator** module (`cargo build --features emu`), not
 the standalone no-device build: every interesting conformance behaviour is
 key-backed and needs a device behind the login.
 
@@ -139,7 +139,7 @@ whose expectations assume a soft token or predate v3.0. For example
 answers `CKR_MECHANISM_INVALID`, and an error for a NULL mechanism, which
 v3.0 made the way to end an operation.
 
-A wrong PIN can be checked on the mock: the first login in a process
+A wrong PIN can be checked on the emulator: the first login in a process
 provisions the credential, and a later login with another PIN fails. It fails
 with `CKR_FUNCTION_FAILED`, because the SDK reports a rejected credential as a
 generic failure, so `UserLoginWrongPIN` (which wants `CKR_PIN_INCORRECT`)
@@ -148,17 +148,17 @@ stays off the list until the SDK names that status.
 No listed test uses a key after its device session ended; key survival
 within a process is covered by the GoogleTest suite (`key_survival.*`). The
 seeded key of the second run is only found and listed, never used: on the
-mock every process provisions its partition afresh, so a key from another
+emulator every process provisions its partition afresh, so a key from another
 process does not unmask there (`CKR_KEY_HANDLE_INVALID`).
 
 ## Running it locally
 
 ```sh
-cargo build -p tsra_pkcs11 --features mock
+cargo build -p tsra_pkcs11 --features emu
 plugins/tsra_pkcs11/tests/pkcs11test/run.sh target/debug/tsra_pkcs11.so
 ```
 
-`tests/run_validation.sh` runs it too, when the mock module is present.
+`tests/run_validation.sh` runs it too, when the emulator module is present.
 
 For the full picture rather than the gate, `offlist.sh` takes the same
 arguments: it runs the gate, then the tool without a filter, and rewrites

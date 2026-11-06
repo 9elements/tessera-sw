@@ -1,10 +1,12 @@
 # Hardware checklist
 
-Every module test runs against the mock device. Some behaviour is decided by
-the firmware and cannot be shown on the mock: credential checks, retry limits,
-provisioning races, capacities, power-cycle survival, firmware crypto paths.
-This file lists those items with the result expected on hardware, so a run on
-a device is a run, not a design session.
+Every module test runs against the emulator (`emu`): the device firmware, run
+in-process, with a fresh device for every process. Some behaviour can only be
+shown on a device that outlives a process or on real hardware: provisioning
+races, power-cycle survival, capacities, and wherever the hardware firmware
+behaves differently from the emulated one. This file lists those items with
+the result expected on hardware, so a run on a device is a run, not a design
+session.
 
 ## Running the suites on hardware
 
@@ -13,9 +15,9 @@ the environment:
 
 | Variable | Meaning |
 |---|---|
-| `TSRA_PKCS11_HW=1` | The module drives a real device. Cases named `*_hw` run; mock-only cases skip. |
+| `TSRA_PKCS11_HW=1` | The module drives a real device. Cases named `*_hw` run; emulator-only cases skip. |
 | `TSRA_PKCS11_MODULE` | Path of the hardware-backed `tsra_pkcs11.so`. |
-| `TSRA_PKCS11_TEST_PIN` | The user PIN of the partition (default: the simulator's `1234`). |
+| `TSRA_PKCS11_TEST_PIN` | The user PIN of the partition (default: `1234`). |
 | `TSRA_PKCS11_ID` | The partition ID, 32 hex characters. A hardware build has no built-in one and does not initialise without it. |
 | `TSRA_PKCS11_OBK_PATH` | The 48-byte owner backup key file (or `obk_path` in the file `TSRA_PKCS11_CONF` names). A hardware build does not initialise without it, and every login reads it. |
 | `TSRA_PKCS11_PERSIST=1`, `TSRA_PKCS11_STORE_DIR` | The file object store, in a directory that does not exist yet. |
@@ -31,12 +33,12 @@ plugins/tsra_pkcs11/tests/pkcs11-check/run.sh "$TSRA_PKCS11_MODULE" "$PWD/pkcs11
 
 The GoogleTest results land in the JUnit files, the pkcs11test log in
 `<work-dir>/run.log`, the pkcs11-check reports in `<work-dir>/run/out`. Any
-difference from the mock result is a finding, not a reason to change an
+difference from the emulator result is a finding, not a reason to change an
 include-list.
 
 In the GoogleTest suite a hardware-only case is named `*_hw` and starts with
 `HW_ONLY("why")`; it is skipped with that reason unless `TSRA_PKCS11_HW=1`. A
-case that pins a mock-only model starts with `MOCK_ONLY("why")` and is skipped
+case that pins an emulator-only model starts with `EMU_ONLY("why")` and is skipped
 on hardware (`integration-tests/cpp/utils/module.hpp`).
 
 ## Checklist
@@ -70,7 +72,7 @@ and the result of the last hardware run.
   and a debug line, on a fresh partition (which stays unprovisioned) and on
   a provisioned one.
 - Cases: `config_test` (unit, the hardware build's configuration),
-  `login.every_login_reads_the_owner_backup_key` (mock only).
+  `login.every_login_reads_the_owner_backup_key` (emulator only).
 - Result: not run yet.
 
 ### H-c Provisioning race
@@ -89,7 +91,7 @@ and the result of the last hardware run.
 - Expect: the same PIN logs in; another PIN fails with `CKR_FUNCTION_FAILED`
   (not `CKR_PIN_INCORRECT` until the SDK names the status); an empty PIN
   fails with `CKR_PIN_LEN_RANGE` unless `TSRA_PKCS11_PIN` sets a default; the
-  token key works in the second process. The mock cannot show the last part:
+  token key works in the second process. The emulator cannot show the last part:
   it provisions every process afresh.
 - Cases: `persist.a_second_process_sees_the_token_object` (the object, not
   the key), `login.*`.
@@ -128,7 +130,7 @@ and the result of the last hardware run.
 - Run: start processes that log in and hold their session until `C_Login`
   refuses; end one; log in again. Fill the key table the same way.
 - Expect: a clean `CK_RV` at the limit and a successful login after one
-  holder ends. No fixed number: firmware and mock differ.
+  holder ends. No fixed number: hardware and emulator may differ.
 - Result: not run yet.
 
 ### H-i Killed processes
@@ -149,7 +151,7 @@ and the result of the last hardware run.
 - Run: an over-long ECDSA digest on the PKA, the XTS key container, GCM keys
   unwrapped over MBOR, a 16-byte XTS tweak against an 8-byte little-endian
   sector number.
-- Expect: the same results as on the mock and the host references.
+- Expect: the same results as on the emulator and the host references.
 - Result: not run yet.
 
 ### H-l RSA decryption timing
@@ -163,5 +165,5 @@ and the result of the last hardware run.
 
 - Run: pkcs11-check against an externally provisioned token; pkcs11-provider
   TLS with a token EC key; `p11perftest -n`.
-- Expect: the same verdicts as on the mock.
+- Expect: the same verdicts as on the emulator.
 - Result: not run yet.

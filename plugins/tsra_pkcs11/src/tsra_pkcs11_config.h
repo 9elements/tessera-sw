@@ -47,7 +47,7 @@ typedef struct
 {
     CK_BYTE id[P11_CREDS_ID_LEN];           /* partition ID of the credential */
     CK_BYTE default_pin[P11_CREDS_PIN_LEN]; /* credential PIN of a login without a PIN */
-    bool id_set;                            /* id is configured, or built into the mock */
+    bool id_set;                            /* id is configured, or built into the emulator */
     bool default_pin_set;                   /* default_pin is configured */
     char store_dir[TSRA_PKCS11_PATH_LEN];   /* persistent object-store root */
     char obk_path[TSRA_PKCS11_PATH_LEN];    /* owner backup key file; empty if none */
@@ -60,9 +60,9 @@ typedef struct
  * Populate `cfg`: the defaults, then the file TSRA_PKCS11_CONF names (when
  * set), then the environment variable of every file key, which wins over the
  * file. Credentials come from the environment only: TSRA_PKCS11_ID and
- * TSRA_PKCS11_PIN, 32 hex characters each. The mock build (TSRA_FEATURE_MOCK)
+ * TSRA_PKCS11_PIN, 32 hex characters each. The emulator build (TSRA_FEATURE_EMULATOR)
  * has a built-in partition ID, a hardware build (TSRA_WITH_HSM without
- * TSRA_FEATURE_MOCK) none and requires TSRA_PKCS11_ID and an obk_path; the key
+ * TSRA_FEATURE_EMULATOR) none and requires TSRA_PKCS11_ID and an obk_path; the key
  * file itself is not read here (tsra_pkcs11_config_obk). A malformed setting
  * fails closed instead of falling back to a default: CKR_GENERAL_ERROR with
  * the reason in cfg->error for a missing, empty or unreadable file, a line that
@@ -101,7 +101,7 @@ CK_RV tsra_pkcs11_pin_normalise(
 );
 
 /*
- * Read the owner backup key: the file cfg->obk_path, or without one the mock
+ * Read the owner backup key: the file cfg->obk_path, or without one the emulator
  * build's built-in key. C_Login reads it at every login and hands it to the
  * device only when the login provisions. A build without either fails closed.
  * CKR_FUNCTION_FAILED for that, and for a file that is missing, a symbolic

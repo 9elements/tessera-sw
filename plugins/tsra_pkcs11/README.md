@@ -192,7 +192,7 @@ What a token key survives:
 - `C_Logout` and `C_Login`, the close of the slot's last session, and
   `C_CloseAllSessions`: yes. `C_Finalize` and `C_Initialize` in the same
   process: yes, with the file store.
-- Another process on the same device: not shown yet. The mock simulator
+- Another process on the same device: not shown yet. The emulator
   provisions every process from scratch, so a key from another process does
   not unmask there (`CKR_KEY_HANDLE_INVALID`). Hardware checklist item H-d.
 - A power cycle or a partition reset: no, not until the module replays the
@@ -222,8 +222,8 @@ serve the same callers.
 ## Build
 
 ```sh
-# Against the simulator / mock DDI (no physical device):
-cargo build -p tsra_pkcs11 --features mock
+# Against the emulator, the device firmware run in-process (no physical device):
+cargo build -p tsra_pkcs11 --features emu
 # -> target/debug/tsra_pkcs11.so
 
 # Standalone (no device linked) framework smoke build:
@@ -260,14 +260,14 @@ hex characters (16 bytes) each:
   PIN zero-padded). With it the token reports
   `CKF_PROTECTED_AUTHENTICATION_PATH`, and a `C_Login` without a PIN uses it.
 
-The mock build has a built-in partition ID and owner backup key. A hardware
+The emulator build has a built-in partition ID and owner backup key. A hardware
 build has neither and needs both in every process: without `TSRA_PKCS11_ID`
 or `obk_path`, `C_Initialize` returns `CKR_GENERAL_ERROR` with a debug line.
 `C_Initialize` only takes the key file's name; the key is in memory only
 during a `C_Login`. Every `C_Login` reads the file before it opens the device session,
 also on a provisioned partition, and returns `CKR_FUNCTION_FAILED` with a
 debug line when it is missing, a symbolic link or not exactly 48 bytes. The
-mock reads a configured `obk_path` the same way.
+emulator build reads a configured `obk_path` the same way.
 
 A bad setting fails closed instead of falling back to a default: an unknown
 key (a credential included), a line without `=`, a boolean other than `1`,
@@ -339,10 +339,10 @@ object policy and attribute typing, key survival across every event that ends
 the device session, what `C_Logout` does to session objects, the
 configuration at `C_Initialize`, the interface list, and the login rules (each
 login case in a process of its own, because the first login of a process
-provisions the mock partition with its PIN). So it needs the mock- or
-hardware-backed build (see the CMakeLists.txt header for
+provisions the emulated partition with its PIN). So it needs the emulator or
+hardware build (see the CMakeLists.txt header for
 the build/run recipe; `TSRA_PKCS11_MODULE` points it at a module,
-`TSRA_PKCS11_TEST_PIN` overrides the simulator PIN). `tests/pkcs11test/` is
+`TSRA_PKCS11_TEST_PIN` overrides the test PIN). `tests/pkcs11test/` is
 the conformance gate: it builds Google's PKCS#11 conformance program at a
 pinned revision and requires every test on its include-list to pass, on the
 memory store and again on a file store seeded with objects, which is how spec

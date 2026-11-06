@@ -2,7 +2,7 @@
 
 Written by `offlist.sh` from an unfiltered pkcs11test run
 (2cbe462c62ba, with the fixture patches) against the
-mock-backed module. Do not edit it by hand: change the bucket rules in
+emulator module. Do not edit it by hand: change the bucket rules in
 `offlist.sh` and run it again.
 
 330 tests: 148 on the include-list, 182 off it (156 fail,

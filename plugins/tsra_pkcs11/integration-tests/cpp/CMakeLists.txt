@@ -4,10 +4,10 @@
 # Functional tests for the TSRA PKCS#11 module, driven through the real
 # Cryptoki ABI: the test binary dlopens the built module (path from the
 # TSRA_PKCS11_MODULE environment variable, defaulting to the cargo build
-# output) and talks to the device behind it, so it needs the mock- or
+# output) and talks to the device behind it, so it needs the emulator or
 # hardware-backed build:
 #
-#   cargo build -p tsra_pkcs11 --features mock
+#   cargo build -p tsra_pkcs11 --features emu
 #   cmake -S plugins/tsra_pkcs11/integration-tests/cpp -B target/pkcs11-cpp-tests
 #   cmake --build target/pkcs11-cpp-tests
 #   ctest --test-dir target/pkcs11-cpp-tests --output-on-failure --no-tests=error

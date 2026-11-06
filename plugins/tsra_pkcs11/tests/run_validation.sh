@@ -5,8 +5,8 @@
 # Runs the checks of the CI workflow's build-and-drive and unit-tests jobs in
 # one go. Builds the standalone no-device module and drives it with OpenSC
 # pkcs11-tool, and runs the device-free unit harnesses under UBSan and ASan
-# (build_units.sh); if the mock-backed module has been built (cargo build -p
-# tsra_pkcs11 --features mock; TSRA_PKCS11_MODULE overrides its path), it also
+# (build_units.sh); if the emulator module has been built (cargo build -p
+# tsra_pkcs11 --features emu; TSRA_PKCS11_MODULE overrides its path), it also
 # runs the C_Login provisioning ceremony, a pkcs11-tool AES keygen and a
 # refused pkcs11-tool key import, the gtest functional suite
 # (integration-tests/cpp) on the memory and the file object store, the
@@ -65,25 +65,25 @@ for pair in SHA-1:sha1sum SHA256:sha256sum SHA384:sha384sum SHA512:sha512sum; do
     [ "$got" = "$exp" ] && echo "  *** $mech OK ***" || { echo "  MISMATCH"; exit 1; }
 done
 
-# --- mock-backed C_Login ceremony (needs the integrated build + mock DDI) ----
+# --- emulator-backed C_Login ceremony (needs the integrated build + emu) ------
 HSMMOD="${TSRA_PKCS11_MODULE:-$REPO/target/debug/tsra_pkcs11.so}"
 if [ -f "$HSMMOD" ]; then
-    echo; echo "== mock-backed: C_Login provisioning ceremony =="
-    echo "   (build it with: cargo build -p tsra_pkcs11 --features mock)"
+    echo; echo "== emulator-backed: C_Login provisioning ceremony =="
+    echo "   (build it with: cargo build -p tsra_pkcs11 --features emu)"
     TSRA_PKCS11_DEBUG=1 pkcs11-tool --module "$HSMMOD" --login --pin 1234 \
         --list-objects 2>&1 | sed 's/^/   /' || echo "   (login harness failed)"
 
     # The AES checks below are hard gates (real functionality, not the login
     # ceremony's best-effort diagnostic above), so announce a failure before the
     # pipefail/errexit abort rather than aborting the script silently.
-    echo; echo "== mock-backed: AES keygen via pkcs11-tool =="
+    echo; echo "== emulator-backed: AES keygen via pkcs11-tool =="
     # --sensitive is required: this token refuses non-sensitive HSM keys.
     if ! pkcs11-tool --module "$HSMMOD" --login --pin 1234 --keygen \
         --key-type aes:32 --label validation --sensitive 2>&1 | sed 's/^/   /'; then
         echo "   (AES keygen failed)"; exit 1
     fi
 
-    echo; echo "== mock-backed: plaintext key import via pkcs11-tool is refused =="
+    echo; echo "== emulator-backed: plaintext key import via pkcs11-tool is refused =="
     printf '0123456789abcdef' > "$WORK/import.key"
     pkcs11-tool --module "$HSMMOD" --login --pin 1234 --write-object "$WORK/import.key" \
         --type secrkey --key-type AES:16 --label import > "$WORK/import.log" 2>&1 || true
@@ -91,7 +91,7 @@ if [ -f "$HSMMOD" ]; then
     grep -q CKR_TEMPLATE_INCONSISTENT "$WORK/import.log" \
         || { echo "   (plaintext key import was not refused)"; exit 1; }
 
-    echo; echo "== mock-backed: gtest functional suite (integration-tests/cpp) =="
+    echo; echo "== emulator-backed: gtest functional suite (integration-tests/cpp) =="
     # googletest is fetched by CMake. Cache only its SOURCE between runs and
     # let every build tree compile it privately: a shared build directory
     # breaks as soon as one of the trees using it goes away.
@@ -113,7 +113,7 @@ if [ -f "$HSMMOD" ]; then
     TSRA_PKCS11_MODULE="$HSMMOD" ctest --test-dir "$WORK/cpp-tests" --output-on-failure \
         --no-tests=error || { echo "   (functional suite failed)"; exit 1; }
 
-    echo; echo "== mock-backed: gtest functional suite on the file store (PERSIST=1) =="
+    echo; echo "== emulator-backed: gtest functional suite on the file store (PERSIST=1) =="
     # Not pre-created: the module must create the store directory owner-only.
     store="$WORK/pkcs11-store"
     TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$store" TSRA_PKCS11_MODULE="$HSMMOD" \
@@ -123,19 +123,19 @@ if [ -f "$HSMMOD" ]; then
     [ "$mode" = 700 ] || { echo "   (store directory mode is $mode, not 700)"; exit 1; }
     echo "   store directory created with mode $mode"
 
-    echo; echo "== mock-backed: pkcs11test conformance gate =="
+    echo; echo "== emulator-backed: pkcs11test conformance gate =="
     # Clones and builds the tool on first use; the work directory is reused. It
     # lives in this checkout's target/ so two worktrees never share a clone.
     "$HERE/pkcs11test/run.sh" "$HSMMOD" "$REPO/target/pkcs11test" \
         || { echo "   (conformance gate failed)"; exit 1; }
 
-    echo; echo "== mock-backed: pkcs11-check conformance gate (PR subset) =="
+    echo; echo "== emulator-backed: pkcs11-check conformance gate (PR subset) =="
     # Installs the pinned tool into target/ on first use (needs python3 3.12
     # and PyPI), like the workflow's per-PR step.
     "$HERE/pkcs11-check/run.sh" --pr "$HSMMOD" "$REPO/target/pkcs11-check" \
         || { echo "   (pkcs11-check gate failed)"; exit 1; }
 else
-    echo; echo "== mock-backed checks skipped (no $HSMMOD) =="
+    echo; echo "== emulator-backed checks skipped (no $HSMMOD) =="
 fi
 
 echo; echo "All validation steps completed."

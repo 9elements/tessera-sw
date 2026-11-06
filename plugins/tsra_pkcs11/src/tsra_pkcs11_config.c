@@ -317,8 +317,8 @@ CK_RV tsra_pkcs11_config_load(tsra_pkcs11_config *cfg)
         return CKR_ARGUMENTS_BAD;
     }
     memset(cfg, 0, sizeof(*cfg));
-#ifdef TSRA_FEATURE_MOCK
-    /* The mock accepts any non-zero partition ID. */
+#ifdef TSRA_FEATURE_EMULATOR
+    /* The emulator accepts any non-zero partition ID. */
     memset(cfg->id, 0x01, sizeof(cfg->id));
     cfg->id_set = true;
 #endif
@@ -355,7 +355,7 @@ CK_RV tsra_pkcs11_config_load(tsra_pkcs11_config *cfg)
             &cfg->default_pin_set
         );
     }
-#if defined(TSRA_WITH_HSM) && !defined(TSRA_FEATURE_MOCK)
+#if defined(TSRA_WITH_HSM) && !defined(TSRA_FEATURE_EMULATOR)
     if ((rv == CKR_OK) && !cfg->id_set)
     {
         snprintf(
@@ -413,8 +413,8 @@ CK_RV tsra_pkcs11_config_obk(const tsra_pkcs11_config *cfg, CK_BYTE obk[P11_OBK_
     }
     if (cfg->obk_path[0] == '\0')
     {
-#ifdef TSRA_FEATURE_MOCK
-        memset(obk, 0xA5, P11_OBK_LEN); /* the mock takes any 48 bytes */
+#ifdef TSRA_FEATURE_EMULATOR
+        memset(obk, 0xA5, P11_OBK_LEN); /* the emulator takes any 48 bytes */
         return CKR_OK;
 #else
         return CKR_FUNCTION_FAILED;

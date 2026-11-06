@@ -6,7 +6,7 @@
 /// C_Login on a token with one user, positive and
 /// negative: the PIN rules, the default PIN, the user types, the token flags,
 /// the owner backup key read at every login and the token-wide login state.
-/// The first login of a process provisions the mock partition with its PIN,
+/// The first login of a process provisions the emulated partition with its PIN,
 /// so a case that got past the PIN rules with another PIN would change the
 /// credential for the rest of its process. Each case therefore runs its body
 /// as login_child.<case> in a process of its own (SubprocessModule).
@@ -275,7 +275,7 @@ TEST_F(login_child, default_pin_logs_in_without_a_pin)
 
 TEST_F(login, sixteen_byte_pin_logs_in)
 {
-    MOCK_ONLY("the first login after power-on chooses the credential");
+    EMU_ONLY("the first login after power-on chooses the credential");
     run_child("sixteen_byte_pin_logs_in");
 }
 
@@ -292,7 +292,7 @@ TEST_F(login_child, sixteen_byte_pin_logs_in)
 
 TEST_F(login, every_login_reads_the_owner_backup_key)
 {
-    MOCK_ONLY("the first login provisions the partition with a test owner backup key");
+    EMU_ONLY("the first login provisions the partition with a test owner backup key");
     run_child("every_login_reads_the_owner_backup_key");
 }
 

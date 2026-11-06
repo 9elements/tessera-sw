@@ -84,10 +84,10 @@ add_library(tsra_pkcs11 SHARED ${TSRA_PKCS11_SOURCES})
 # The module talks to the TSRA SDK through tsra.h; enable the backend seam.
 target_compile_definitions(tsra_pkcs11 PRIVATE TSRA_WITH_HSM=1)
 
-# Only the mock build has built-in provisioning inputs (partition ID, owner
+# Only the emulator build has built-in provisioning inputs (partition ID, owner
 # backup key); a hardware build without configured ones refuses to log in.
-if(TSRA_CARGO_FEATURES MATCHES "(^| )mock($| )")
-    target_compile_definitions(tsra_pkcs11 PRIVATE TSRA_FEATURE_MOCK)
+if(TSRA_CARGO_FEATURES MATCHES "(^| )emu($| )")
+    target_compile_definitions(tsra_pkcs11 PRIVATE TSRA_FEATURE_EMULATOR)
 endif()
 
 # Vendored OASIS PKCS#11 v3.1 headers + our sources.

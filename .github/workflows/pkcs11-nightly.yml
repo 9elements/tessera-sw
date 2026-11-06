@@ -29,12 +29,12 @@ jobs:
       - name: Install CMake and OpenSSL headers
         run: sudo apt-get install -y cmake libssl-dev
 
-      - name: Build PKCS#11 module against the mock DDI, with ASan and UBSan
+      - name: Build PKCS#11 module against the emulator (emu), with ASan and UBSan
         env:
           CFLAGS: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
           LDFLAGS: -fsanitize=address,undefined
         run: |
-          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features mock
+          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features emu
           echo "TSRA_PKCS11_MODULE=$RUNNER_TEMP/target/debug/tsra_pkcs11.so" >> "$GITHUB_ENV"
 
       - name: Build the functional tests with ASan and UBSan
@@ -56,7 +56,7 @@ jobs:
           TSRA_PKCS11_PERSIST=1 TSRA_PKCS11_STORE_DIR="$RUNNER_TEMP/pkcs11-store" \
             ctest --test-dir "$RUNNER_TEMP/pkcs11-cpp-tests" --output-on-failure --no-tests=error
 
-  # The external tools on one mock build; each check is its own step so a red
+  # The external tools on one emulator build; each check is its own step so a red
   # one does not hide the others.
   conformance:
     runs-on: ubuntu-24.04
@@ -68,9 +68,9 @@ jobs:
       - name: Install CMake, OpenSSL headers, and OpenSC pkcs11-tool
         run: sudo apt-get install -y cmake libssl-dev opensc
 
-      - name: Build PKCS#11 module against the mock DDI
+      - name: Build PKCS#11 module against the emulator (emu)
         run: |
-          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features mock
+          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features emu
           echo "TSRA_PKCS11_MODULE=$RUNNER_TEMP/target/debug/tsra_pkcs11.so" >> "$GITHUB_ENV"
 
       # The whole fast profile: every listed test must pass, nothing may crash
@@ -125,9 +125,9 @@ jobs:
             | sh -s -- -y --default-toolchain none --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Build PKCS#11 module against the mock DDI
+      - name: Build PKCS#11 module against the emulator (emu)
         run: |
-          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features mock
+          cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11 --features emu
           echo "TSRA_PKCS11_MODULE=$RUNNER_TEMP/target/debug/tsra_pkcs11.so" >> "$GITHUB_ENV"
 
       - name: Token digests through pkcs11-provider

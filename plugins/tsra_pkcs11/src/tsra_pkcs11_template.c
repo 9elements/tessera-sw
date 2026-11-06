@@ -18,8 +18,8 @@
 /* The one tag length the device produces, in the unit CK_GCM_PARAMS uses. */
 #define GCM_TAG_BITS (AES_GCM_TAG_LEN * 8)
 
-/* XTS tweaks are held to their low 64 bits: V2 device sessions refuse more and
- * the mock ignores the rest, so one rule holds on every session kind. */
+/* XTS tweaks are held to their low 64 bits: V2 device sessions refuse more, so
+ * one rule holds on every session kind. */
 #define XTS_TWEAK_LOW_LEN sizeof(uint64_t)
 
 /* The key families C_GenerateKey can produce; see tsra_pkcs11_keygen_policy. */

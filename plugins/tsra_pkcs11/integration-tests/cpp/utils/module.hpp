@@ -153,7 +153,7 @@ inline CK_FUNCTION_LIST_PTR p11()
     return Pkcs11Module::instance().fns();
 }
 
-/// TSRA_PKCS11_HW=1: the module under test drives a real device, not the mock.
+/// TSRA_PKCS11_HW=1: the module under test drives a real device, not the emulator.
 inline bool on_hardware()
 {
     const char *e = std::getenv("TSRA_PKCS11_HW");
@@ -162,7 +162,7 @@ inline bool on_hardware()
 
 /// The first statement of a case only hardware can decide (firmware checks,
 /// power cycles, a second process on a provisioned partition). Such a case is
-/// named *_hw and is skipped unless TSRA_PKCS11_HW=1; `why` says what the mock
+/// named *_hw and is skipped unless TSRA_PKCS11_HW=1; `why` says what the emulator
 /// cannot show. tests/HARDWARE.md lists the checklist items behind them.
 #define HW_ONLY(why)                                                                               \
     do                                                                                             \
@@ -177,14 +177,14 @@ inline bool on_hardware()
         }                                                                                          \
     } while (0)
 
-/// The first statement of a case that pins a mock-only model (capacities, one
+/// The first statement of a case that pins an emulator-only model (capacities, one
 /// fresh partition per process); skipped when TSRA_PKCS11_HW=1.
-#define MOCK_ONLY(why)                                                                             \
+#define EMU_ONLY(why)                                                                              \
     do                                                                                             \
     {                                                                                              \
         if (on_hardware())                                                                         \
         {                                                                                          \
-            GTEST_SKIP() << "mock only: " << (why);                                                \
+            GTEST_SKIP() << "emulator only: " << (why);                                            \
         }                                                                                          \
     } while (0)
 

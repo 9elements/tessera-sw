@@ -24,6 +24,6 @@ workspace = true
 
 [features]
 default = []
-# Forwarded to tsra_api_native so the module can be built against the
-# simulator/mock DDI with no physical HSM present.
-mock = []
+# Forwarded to tsra_api_native: the device firmware run in-process, so the
+# module can be built and tested with no physical HSM present.
+emu = []

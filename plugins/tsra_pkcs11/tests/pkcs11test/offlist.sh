@@ -153,7 +153,7 @@ fi
     echo
     echo "Written by \`offlist.sh\` from an unfiltered pkcs11test run"
     echo "($(git -C "$SRC" rev-parse --short=12 HEAD), with the fixture patches) against the"
-    echo "mock-backed module. Do not edit it by hand: change the bucket rules in"
+    echo "emulator module. Do not edit it by hand: change the bucket rules in"
     echo "\`offlist.sh\` and run it again."
     echo
     echo "${#RAN[@]} tests: $((${#RAN[@]} - off)) on the include-list, $off off it ($failing fail,"

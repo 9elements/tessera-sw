@@ -46,8 +46,9 @@ in 112 s, the gate 885 tests in 174 s, `--full` about 4.5 minutes.
 ## The include-list and the baseline
 
 `include-list.txt` names every test of the fast profile that passed on the
-mock build, except those in `baseline.txt`, which pass without showing
-anything about this module:
+mock build (the emulator's predecessor; the same tests pass on the emulator),
+except those in `baseline.txt`, which pass without showing anything about
+this module:
 
 | tag | why it is off the list |
 |---|---|
@@ -68,7 +69,7 @@ import, templates over 1 MiB) and errors of pkcs11-check itself.
 
 pkcs11-check runs a test file in its own process, and a test in its own
 process after a crash, so the module starts fresh for every file: the first
-login in each process provisions the mock partition with the test PIN.
+login in each process provisions the emulated partition with the test PIN.
 
 ## The patch (`rng-helper.patch`)
 
@@ -94,9 +95,9 @@ pinned wheels into a directory and point `PIP_FIND_LINKS` at it with
 ## Running it locally
 
 ```sh
-cargo build -p tsra_pkcs11 --features mock
+cargo build -p tsra_pkcs11 --features emu
 plugins/tsra_pkcs11/tests/pkcs11-check/run.sh --pr target/debug/tsra_pkcs11.so
 ```
 
-`tests/run_validation.sh` runs the `--pr` gate too, when the mock module is
+`tests/run_validation.sh` runs the `--pr` gate too, when the emulator module is
 present.
