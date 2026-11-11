@@ -17,12 +17,18 @@
 //! disables and re-enables this endpoint's partition, coordinated across all
 //! connections. Independent root/leaf instances need separate server processes.
 
+#[cfg(feature = "test-args")]
+mod test_args;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[cfg(feature = "test-args")]
+pub use test_args::TEST_ARGS_ENV;
+#[cfg(feature = "test-args")]
+pub use test_args::TestArgs;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tsra_ddi_mbor_types::DdiDecoder;
@@ -40,6 +46,7 @@ use tsra_ddi_sock_proto::Request;
 use tsra_ddi_sock_proto::RequestFrame;
 use tsra_ddi_sock_proto::Response;
 use tsra_ddi_sock_proto::ResponseFrame;
+use tsra_ddi_sock_proto::TRANSPORT_SESSION_NEEDS_RENEGOTIATION;
 use tsra_ddi_sock_proto::TRANSPORT_SESSION_NOT_OWNED;
 use tsra_ddi_tbor_types::SessionControlKind;
 use tsra_ddi_tbor_types::TBOR_OP_SESSION_OPEN_FINISH;
@@ -64,9 +71,17 @@ use tsra_fw_hsm_io::SessionFlags;
 use tsra_fw_hsm_io::SqeBuilder;
 use tsra_fw_hsm_std::StdHsm;
 
+// This crate's own unit tests build their own `StdHsm`, so they never
+// autostart one.
+#[cfg(all(feature = "autostart", not(test)))]
+mod autostart;
+#[cfg(all(feature = "autostart", not(test)))]
+pub use autostart::autostarted;
 mod tcp;
 #[cfg(unix)]
 mod unix;
+
+pub use tcp::spawn_loopback;
 
 const HSM_PARTITION_ID: u8 = 10;
 const HSM_BULK_QID: u16 = 1;
@@ -279,15 +294,23 @@ impl Connection {
                 // firmware, so ownership alone is insufficient here.
                 let session_id = BulkSqe::parse(&submission.sqe).map(|sqe| sqe.session_id);
                 let sessions = server.sessions.read().await;
-                if session_id.is_ok_and(|id| {
-                    !state.owns_session(id, &sessions)
-                        || !sessions
-                            .get(&id)
-                            .is_some_and(|owner| owner.state == SessionState::Active)
-                }) {
-                    return Ok(ResponseFrame::Submit(transport_error(
-                        TRANSPORT_SESSION_NOT_OWNED,
-                    )));
+                if let Ok(id) = session_id {
+                    let session_state = state
+                        .owns_session(id, &sessions)
+                        .then(|| sessions.get(&id).map(|owner| owner.state))
+                        .flatten();
+                    let rejection = match session_state {
+                        Some(SessionState::Active) => None,
+                        // Report a reset-invalidated session like firmware
+                        // would, so clients renegotiate and retry.
+                        Some(SessionState::NeedsRenegotiation) => {
+                            Some(TRANSPORT_SESSION_NEEDS_RENEGOTIATION)
+                        }
+                        _ => Some(TRANSPORT_SESSION_NOT_OWNED),
+                    };
+                    if let Some(status) = rejection {
+                        return Ok(ResponseFrame::Submit(transport_error(status)));
+                    }
                 }
                 let response = execute_frame(Arc::clone(&server), request).await;
                 drop(sessions);
@@ -443,7 +466,7 @@ impl Drop for Connection {
                         sessions.remove(&session.id);
                     }
                     Err(error) => {
-                        eprintln!("disconnected client session cleanup failed: {error}");
+                        tracing::error!(%error, "Disconnected client session cleanup failed");
                     }
                 }
             }
@@ -564,7 +587,7 @@ async fn execute_bulk(server: &SocketHsm, raw: RawBulkSqe, request: Request) -> 
     {
         Ok(cqe) => cqe,
         Err(error) => {
-            eprintln!("StdHsm bulk request failed: {error:?}");
+            tracing::error!(?error, "StdHsm bulk request failed");
             return transport_error(TRANSPORT_HSM_ERROR);
         }
     };
@@ -644,7 +667,7 @@ async fn execute_normal(server: &SocketHsm, request: Request) -> Response {
     let cqe = match server.hsm.io(sqe, HSM_PARTITION_ID, 0, 0).await {
         Ok(cqe) => cqe,
         Err(error) => {
-            eprintln!("StdHsm request failed: {error:?}");
+            tracing::error!(?error, "StdHsm request failed");
             return transport_error(TRANSPORT_HSM_ERROR);
         }
     };
@@ -698,7 +721,7 @@ async fn execute_frame(server: Arc<SocketHsm>, request: RequestFrame) -> Respons
                 let status = match result {
                     Ok(()) => 0,
                     Err(error) => {
-                        eprintln!("StdHsm reset failed: {error:?}");
+                        tracing::error!(?error, "StdHsm reset failed");
                         TRANSPORT_HSM_ERROR
                     }
                 };
@@ -710,7 +733,7 @@ async fn execute_frame(server: Arc<SocketHsm>, request: RequestFrame) -> Respons
     {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("StdHsm execution task failed: {error}");
+            tracing::error!(%error, "StdHsm execution task failed");
             if reset {
                 ResponseFrame::Reset {
                     status: TRANSPORT_HSM_ERROR,
@@ -722,10 +745,38 @@ async fn execute_frame(server: Arc<SocketHsm>, request: RequestFrame) -> Respons
     }
 }
 
+/// Number of resource bits the std platform accepts in a partition mask.
+const MAX_RESOURCES: u32 = 65;
+
+/// Sets `count` contiguous resource bits starting at [`HSM_PARTITION_ID`],
+/// wrapping at [`MAX_RESOURCES`], so a count of 1 yields `1 << 10`.
+fn part_res_mask(count: u32) -> u128 {
+    (0..count).fold(0u128, |mask, i| {
+        mask | 1u128 << ((HSM_PARTITION_ID as u32 + i) % MAX_RESOURCES)
+    })
+}
+
+/// How many vault tables (resources) the served partition is allocated:
+/// the `resource_count` key of `TSRA_TEST_ARGS` (`1..=MAX_RESOURCES`) with
+/// the `test-args` feature, otherwise 1.
+fn resource_count() -> Result<u32, String> {
+    #[cfg(feature = "test-args")]
+    if let Some(count) = TestArgs::from_env().resource_count {
+        return if (1..=MAX_RESOURCES).contains(&count) {
+            Ok(count)
+        } else {
+            Err(format!(
+                "TSRA_TEST_ARGS resource_count={count} must be 1..={MAX_RESOURCES}"
+            ))
+        };
+    }
+    Ok(1)
+}
+
 async fn init_partition(server: &SocketHsm) -> Result<(), String> {
     server
         .hsm
-        .part_alloc(HSM_PARTITION_ID, 1u128 << HSM_PARTITION_ID)
+        .part_alloc(HSM_PARTITION_ID, part_res_mask(resource_count()?))
         .await
         .map_err(|error| format!("failed to allocate HSM partition: {error:?}"))?;
     server
@@ -1093,13 +1144,17 @@ mod linux {
         Ok(listener)
     }
 
-    async fn run_server(hsm: Arc<SocketHsm>, listener: Socket) -> Result<(), String> {
+    async fn run_server(
+        hsm: Arc<SocketHsm>,
+        listener: Socket,
+        on_listening: impl FnOnce(&super::Listening),
+    ) -> Result<(), String> {
         let listener = listener
             .into_async_fd()
             .map_err(|error| format!("failed to register vsock listener: {error}"))?;
         super::init_partition(&hsm).await?;
 
-        println!("TSRA DDI server listening on vsock port {VSOCK_PORT}");
+        on_listening(&super::Listening::new(format!("vsock://*:{VSOCK_PORT}")));
         loop {
             let stream = loop {
                 let mut ready = listener
@@ -1115,24 +1170,24 @@ mod linux {
             let stream = stream
                 .into_async_fd()
                 .map_err(|error| format!("failed to register vsock connection: {error}"))?;
-            println!("DDI client connected");
             let hsm = Arc::clone(&hsm);
             tokio::spawn(async move {
                 if let Err(error) = serve_connection(stream, hsm).await {
-                    eprintln!("DDI client connection failed: {error}");
-                } else {
-                    println!("DDI client disconnected");
+                    tracing::warn!(%error, "VSOCK client connection failed");
                 }
             });
         }
     }
 
-    pub(super) fn run() -> Result<(), String> {
-        run_with_listener(bind_listener()?)
+    pub(super) fn run(on_listening: impl FnOnce(&super::Listening)) -> Result<(), String> {
+        run_with_listener(bind_listener()?, on_listening)
     }
 
-    fn run_with_listener(listener: Socket) -> Result<(), String> {
-        super::run_with_hsm(|hsm| run_server(hsm, listener))
+    fn run_with_listener(
+        listener: Socket,
+        on_listening: impl FnOnce(&super::Listening),
+    ) -> Result<(), String> {
+        super::run_with_hsm(|hsm| run_server(hsm, listener, on_listening))
     }
 
     #[cfg(test)]
@@ -1180,7 +1235,7 @@ mod linux {
             // A readable socket that is not a listener forces accept to fail
             // after partition setup, without requiring VSOCK support.
             let listener = Socket::new_nonblocking(socket.into_raw_fd()).expect("test socket");
-            let error = run_with_listener(listener).expect_err("accept must fail");
+            let error = run_with_listener(listener, |_| {}).expect_err("accept must fail");
             assert!(error.starts_with("failed to accept connection:"), "{error}");
         }
 
@@ -1279,7 +1334,33 @@ mod linux {
     }
 }
 
-fn run() -> Result<(), String> {
+/// A server that is ready for clients, reported to the callback of [`run`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listening {
+    /// Endpoint clients connect to, e.g. `tcp://127.0.0.1:1234`.
+    pub endpoint: String,
+    /// HSM partition served to every connection.
+    pub partition: u8,
+}
+
+impl Listening {
+    fn new(endpoint: String) -> Self {
+        Self {
+            endpoint,
+            partition: HSM_PARTITION_ID,
+        }
+    }
+}
+
+impl std::fmt::Display for Listening {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}; partition {}", self.endpoint, self.partition)
+    }
+}
+
+/// Run the server using the endpoint from the command line, calling
+/// `on_listening` once it accepts clients.
+pub fn run(on_listening: impl FnOnce(&Listening)) -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let endpoint = args.next().unwrap_or_else(|| {
         if cfg!(target_os = "linux") {
@@ -1294,11 +1375,11 @@ fn run() -> Result<(), String> {
         );
     }
     if let Some(address) = endpoint.strip_prefix("tcp://") {
-        tcp::run(address)
+        tcp::run(address, on_listening)
     } else if let Some(path) = endpoint.strip_prefix("unix://") {
         #[cfg(unix)]
         {
-            unix::run(path)
+            unix::run(path, on_listening)
         }
         #[cfg(not(unix))]
         {
@@ -1308,7 +1389,7 @@ fn run() -> Result<(), String> {
     } else if endpoint == "vsock://*:1234" {
         #[cfg(target_os = "linux")]
         {
-            linux::run()
+            linux::run(on_listening)
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -1322,18 +1403,20 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("TSRA DDI socket server failed: {error}");
-        std::process::exit(1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
+
+    #[test]
+    fn part_res_mask_starts_at_partition_and_wraps() {
+        assert_eq!(part_res_mask(1), 1u128 << HSM_PARTITION_ID);
+        assert_eq!(part_res_mask(4), 0b1111u128 << HSM_PARTITION_ID);
+        let all = part_res_mask(MAX_RESOURCES);
+        assert_eq!(all.count_ones(), MAX_RESOURCES);
+        assert_eq!(all >> MAX_RESOURCES, 0);
+    }
 
     #[test]
     fn shared_test_hsm_initializes_partition_once() {

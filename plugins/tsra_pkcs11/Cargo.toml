@@ -13,17 +13,9 @@ edition = "2024"
 name = "tsra_pkcs11"
 version = "0.0.1"
 
-[dependencies]
-
 [target.'cfg(target_os = "linux")'.build-dependencies]
 cmake.workspace = true
 tsra_api_native.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-default = []
-# Forwarded to tsra_api_native: the device firmware run in-process, so the
-# module can be built and tested with no physical HSM present.
-emu = []
