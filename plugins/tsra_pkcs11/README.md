@@ -48,7 +48,8 @@ the spec requires). Implemented so far:
   `C_SetAttributeValue` changes only the attributes PKCS#11 marks modifiable
   for the object's class (label, ID, dates, usage flags), and applies a
   template all-or-nothing; on keys `CKA_SENSITIVE` can only become TRUE and
-  `CKA_EXTRACTABLE` only FALSE. `C_DestroyObject` needs a read/write session
+  `CKA_EXTRACTABLE` only FALSE, and an EC key's usage flags stay as generated
+  (see Deviations). `C_DestroyObject` needs a read/write session
   for a token object (`CKR_SESSION_READ_ONLY`) and refuses an object with
   `CKA_DESTROYABLE` FALSE (`CKR_ACTION_PROHIBITED`).
   `C_GetObjectSize` reports the bytes of the attribute values plus the masked
@@ -174,7 +175,10 @@ the spec requires). Implemented so far:
   the debug trace (`TSRA_PKCS11_DEBUG=1`) names the rule. Ask for one:
   `pkcs11-tool --keypairgen --key-type EC:prime256v1 --usage-sign` (or
   `--usage-derive`). Tools that ask for both by default, such as
-  `pkcs11-tool` without a `--usage-*` option, get this error.
+  `pkcs11-tool` without a `--usage-*` option, get this error. The usage
+  stays as generated: `CKA_SIGN`, `CKA_VERIFY` and `CKA_DERIVE` of an EC key
+  are read-only (`CKR_ATTRIBUTE_READ_ONLY`), where PKCS#11 lets them change,
+  because the device key keeps the usage it was made with.
 - **No per-operation login.** The token has no context-specific login
   (`CKU_CONTEXT_SPECIFIC`) that would enforce `CKA_ALWAYS_AUTHENTICATE`, so a
   private-key template with it TRUE returns `CKR_ATTRIBUTE_VALUE_INVALID`.

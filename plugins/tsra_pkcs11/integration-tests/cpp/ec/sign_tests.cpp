@@ -332,20 +332,27 @@ TEST_F(ec_sign, init_precedence_and_usage)
     ASSERT_CKR_OK(p11()->C_CreateObject(s_, tmpl, 3, &created));
     EXPECT_CKR(CKR_KEY_HANDLE_INVALID, p11()->C_VerifyInit(s_, &m, created));
 
-    // CKA_VERIFY cleared on the public key, and an allowed-mechanism list.
+    // The device fixed the pair's usage, so CKA_VERIFY stays as generated: a
+    // public key generated without it does not verify.
     CK_BBOOL no = CK_FALSE;
+    CK_BBOOL yes = CK_TRUE;
     CK_ATTRIBUTE off = { CKA_VERIFY, &no, sizeof(no) };
-    ASSERT_CKR_OK(p11()->C_SetAttributeValue(s_, pub_, &off, 1));
-    EXPECT_CKR(CKR_KEY_FUNCTION_NOT_PERMITTED, p11()->C_VerifyInit(s_, &m, pub_));
-
+    EXPECT_CKR(CKR_ATTRIBUTE_READ_ONLY, p11()->C_SetAttributeValue(s_, pub_, &off, 1));
+    CK_MECHANISM keygen = { CKM_EC_KEY_PAIR_GEN, nullptr, 0 };
+    CK_ATTRIBUTE no_verify_pub[] = { { CKA_EC_PARAMS, params.data(), params.size() }, off };
+    CK_ATTRIBUTE signing_priv[] = { { CKA_SIGN, &yes, sizeof(yes) } };
     CK_OBJECT_HANDLE pub = 0;
     CK_OBJECT_HANDLE priv = 0;
+    ASSERT_CKR_OK(
+        p11()->C_GenerateKeyPair(s_, &keygen, no_verify_pub, 2, signing_priv, 1, &pub, &priv)
+    );
+    EXPECT_CKR(CKR_KEY_FUNCTION_NOT_PERMITTED, p11()->C_VerifyInit(s_, &m, pub));
+
+    // An allowed-mechanism list.
     CK_MECHANISM_TYPE only384 = CKM_ECDSA_SHA384;
-    CK_BBOOL yes = CK_TRUE;
     CK_ATTRIBUTE pub_tmpl[] = { { CKA_EC_PARAMS, params.data(), params.size() } };
     CK_ATTRIBUTE priv_tmpl[] = { { CKA_SIGN, &yes, sizeof(yes) },
                                  { CKA_ALLOWED_MECHANISMS, &only384, sizeof(only384) } };
-    CK_MECHANISM keygen = { CKM_EC_KEY_PAIR_GEN, nullptr, 0 };
     ASSERT_CKR_OK(p11()->C_GenerateKeyPair(s_, &keygen, pub_tmpl, 1, priv_tmpl, 2, &pub, &priv));
     EXPECT_CKR(CKR_KEY_FUNCTION_NOT_PERMITTED, p11()->C_SignInit(s_, &m, priv));
     CK_MECHANISM m384 = { CKM_ECDSA_SHA384, nullptr, 0 };
