@@ -12,8 +12,10 @@
 /// EC attributes, visibility while logged out, and that generation gives its
 /// device resources back.
 
+#include <algorithm>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -212,6 +214,43 @@ TEST_F(ec_keygen, the_pair_carries_its_attributes)
     EXPECT_EQ(0xEE, raw[0]) << "the buffer must not have been written";
     std::vector<CK_BYTE> none;
     EXPECT_CKR(CKR_ATTRIBUTE_TYPE_INVALID, get_bytes(s_, priv, CKA_EC_POINT, none));
+}
+
+TEST_F(ec_keygen, a_pair_without_cka_token_reads_and_is_found_as_session_objects)
+{
+    std::vector<CK_BYTE> params = ec_curves()[0].params;
+    CK_ATTRIBUTE pub_tmpl[] = { { CKA_EC_PARAMS, params.data(), params.size() } };
+    CK_ATTRIBUTE priv_tmpl[] = { { CKA_SIGN, &g_true, sizeof(g_true) } };
+    CK_OBJECT_HANDLE pub = 0;
+    CK_OBJECT_HANDLE priv = 0;
+    ASSERT_CKR_OK(p11()->C_GenerateKeyPair(
+        s_,
+        &g_ec_keygen,
+        pub_tmpl,
+        std::size(pub_tmpl),
+        priv_tmpl,
+        std::size(priv_tmpl),
+        &pub,
+        &priv
+    ));
+
+    CK_ATTRIBUTE session_only = { CKA_TOKEN, &g_false, sizeof(g_false) };
+    ASSERT_CKR_OK(p11()->C_FindObjectsInit(s_, &session_only, 1));
+    std::vector<CK_OBJECT_HANDLE> found;
+    CK_OBJECT_HANDLE h = 0;
+    CK_ULONG n = 0;
+    while ((p11()->C_FindObjects(s_, &h, 1, &n) == CKR_OK) && (n == 1))
+    {
+        found.push_back(h);
+    }
+    ASSERT_CKR_OK(p11()->C_FindObjectsFinal(s_));
+    for (CK_OBJECT_HANDLE key : { pub, priv })
+    {
+        CK_BBOOL token = 0x55;
+        ASSERT_CKR_OK(get_attr(s_, key, CKA_TOKEN, &token));
+        EXPECT_EQ(CK_FALSE, token);
+        EXPECT_NE(found.end(), std::find(found.begin(), found.end(), key));
+    }
 }
 
 TEST_F(ec_keygen, ec_attributes_follow_the_sizing_rules)
