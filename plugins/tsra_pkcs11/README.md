@@ -222,8 +222,10 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
 - Reading a private object needs the login, whose device session unmasks the
   record's key and decrypts the record. A record whose tag does not match, or
   a clear record that claims `CKA_PRIVATE`, is refused:
-  `CKR_FUNCTION_FAILED`, and a search leaves it out. A device or session
-  failure while a search opens a record fails `C_FindObjectsInit` instead.
+  `CKR_FUNCTION_FAILED`. So is every search that meets it, with a debug line
+  naming the file, until the record is removed: the device reports a tag
+  mismatch and its own fault alike, so leaving the record out could hide an
+  object.
 - A record whose key the device does not unmask (the partition was
   provisioned afresh, as after a power cycle; on the simulator, a new server)
   is invisible

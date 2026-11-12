@@ -967,8 +967,8 @@ int main(void)
         "seal: once the old keys unmask again, their records open again"
     );
 
-    /* A device or session failure fails the search: skipping the record would
-     * show an existing private object as missing. */
+    /* A record that does not open fails the search: skipping it would show an
+     * existing private object as missing. */
     void *failed = NULL;
     fake_gcm_fail = CKR_DEVICE_ERROR;
     CHECK(
@@ -979,6 +979,11 @@ int main(void)
     CHECK(
         s.ops->find_init(s.ctx, SEAL_SLOT, CK_TRUE, NULL, 0, &failed) == CKR_USER_NOT_LOGGED_IN,
         "seal: so does a session the device no longer knows"
+    );
+    fake_gcm_fail = CKR_FUNCTION_FAILED;
+    CHECK(
+        s.ops->find_init(s.ctx, SEAL_SLOT, CK_TRUE, NULL, 0, &failed) == CKR_FUNCTION_FAILED,
+        "seal: and a failure the device cannot tell from tampering"
     );
     fake_gcm_fail = CKR_OK;
 
@@ -992,8 +997,8 @@ int main(void)
     }
     CHECK(
         read_label(&s, SEAL_SLOT, CK_TRUE, p1, lbuf, sizeof(lbuf), &llen) == CKR_FUNCTION_FAILED &&
-            find_count(&s, SEAL_SLOT, CK_TRUE, NULL, 0) == 1,
-        "seal: a tampered record is refused and left out of a search"
+            s.ops->find_init(s.ctx, SEAL_SLOT, CK_TRUE, NULL, 0, &failed) == CKR_FUNCTION_FAILED,
+        "seal: a tampered record is refused, and so is a search"
     );
     unsigned char *f2 = slurp(path, &flen);
     f1 = slurp(path2, &flen1);
@@ -1023,8 +1028,7 @@ int main(void)
     CHECK(
         tsra_pkcs11_record_encode(&forged, NULL, fbuf, &fl) == CKR_OK && spill(path, fbuf, fl) &&
             read_label(&s, SEAL_SLOT, CK_TRUE, TOKEN_FLAG | 900, lbuf, sizeof(lbuf), &llen) ==
-                CKR_FUNCTION_FAILED &&
-            find_count(&s, SEAL_SLOT, CK_TRUE, NULL, 0) == 0,
+                CKR_FUNCTION_FAILED,
         "seal: a clear record claiming CKA_PRIVATE is refused"
     );
     forged_attrs[2].value = &ck_false;

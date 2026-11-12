@@ -240,7 +240,12 @@ TEST_F(persist, tampered_private_record_is_refused)
     CK_BYTE buf[64];
     CK_ATTRIBUTE label = { CKA_LABEL, buf, sizeof(buf) };
     EXPECT_CKR(CKR_FUNCTION_FAILED, p11()->C_GetAttributeValue(s_, obj, &label, 1));
-    EXPECT_TRUE(find_label(s_, kPrivateLabel).empty()) << "a search leaves it out";
+    CK_RV find_rv = p11()->C_FindObjectsInit(s_, nullptr, 0);
+    if (find_rv == CKR_OK)
+    {
+        (void)p11()->C_FindObjectsFinal(s_);
+    }
+    EXPECT_CKR(CKR_FUNCTION_FAILED, find_rv) << "a search fails rather than leave it out";
 
     write_record(data);
     EXPECT_EQ(kPrivateValue, read_value(s_, obj)) << "the untouched record reads again";

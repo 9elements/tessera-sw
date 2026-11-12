@@ -892,8 +892,7 @@ static int parse_object_name(const char *name, CK_ULONG *num)
  * Lock-free by design: each object write is an atomic rename or link and a
  * deletion is tolerated (a file that vanishes mid-scan is skipped), so a scan
  * never reads a torn record; an object added concurrently may be missed, which
- * PKCS#11 allows. A device or session failure while opening a private record
- * fails the scan.
+ * PKCS#11 allows. A record that is there but does not open fails the scan.
  */
 static CK_RV collect_token_matches(
     file_store *st,
@@ -925,16 +924,16 @@ static CK_RV collect_token_matches(
         }
         tsra_pkcs11_rec_object o;
         rv = read_token_object(st, slot, user_logged_in, dir, e->d_name, num, &o);
-        if ((rv == CKR_OBJECT_HANDLE_INVALID) || (rv == CKR_FUNCTION_FAILED))
+        if (rv == CKR_OBJECT_HANDLE_INVALID)
         {
-            /* Removed mid-scan, invisible, or corrupt: skip it rather than fail
-             * the whole scan. A device or session failure is returned instead:
-             * skipping would show an existing object as missing. */
-            rv = CKR_OK;
+            rv = CKR_OK; /* removed mid-scan or invisible */
             continue;
         }
         if (rv != CKR_OK)
         {
+            /* The device reports a tag mismatch and its own fault alike, so
+             * leaving the record out could show an existing object as missing. */
+            TSRA_PKCS11_LOG("%s/%s: cannot be read (0x%lx), the search fails", dir, e->d_name, rv);
             break;
         }
         if (matches_rec(&o, tmpl, count))
