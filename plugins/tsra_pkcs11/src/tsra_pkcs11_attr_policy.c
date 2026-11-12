@@ -402,8 +402,8 @@ CK_RV tsra_pkcs11_destroy_check(CK_BBOOL rw_session, tsra_pkcs11_attr_reader rea
 /*
  * A public key of a type this token uses needs what it cannot be used
  * without: an EC key its curve, one the token supports, and a point encoded
- * for that curve; an RSA key its modulus and exponent. Other key types are
- * stored as given.
+ * for that curve; an RSA key its modulus and exponent, neither empty. Other
+ * key types are stored as given.
  */
 static CK_RV public_key_check(const CK_ATTRIBUTE *tmpl, CK_ULONG count)
 {
@@ -415,10 +415,13 @@ static CK_RV public_key_check(const CK_ATTRIBUTE *tmpl, CK_ULONG count)
     }
     if (kt == CKK_RSA)
     {
-        return ((tsra_pkcs11_tmpl_find(tmpl, count, CKA_MODULUS) != NULL) &&
-                (tsra_pkcs11_tmpl_find(tmpl, count, CKA_PUBLIC_EXPONENT) != NULL))
-                   ? CKR_OK
-                   : CKR_TEMPLATE_INCOMPLETE;
+        const CK_ATTRIBUTE *n = tsra_pkcs11_tmpl_find(tmpl, count, CKA_MODULUS);
+        const CK_ATTRIBUTE *e = tsra_pkcs11_tmpl_find(tmpl, count, CKA_PUBLIC_EXPONENT);
+        if ((n == NULL) || (e == NULL))
+        {
+            return CKR_TEMPLATE_INCOMPLETE;
+        }
+        return ((n->ulValueLen > 0) && (e->ulValueLen > 0)) ? CKR_OK : CKR_ATTRIBUTE_VALUE_INVALID;
     }
     if (kt != CKK_EC)
     {
