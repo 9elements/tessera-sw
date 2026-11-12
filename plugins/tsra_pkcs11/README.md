@@ -175,6 +175,9 @@ the spec requires). Implemented so far:
   `pkcs11-tool --keypairgen --key-type EC:prime256v1 --usage-sign` (or
   `--usage-derive`). Tools that ask for both by default, such as
   `pkcs11-tool` without a `--usage-*` option, get this error.
+- **No per-operation login.** The token has no context-specific login
+  (`CKU_CONTEXT_SPECIFIC`) that would enforce `CKA_ALWAYS_AUTHENTICATE`, so a
+  private-key template with it TRUE returns `CKR_ATTRIBUTE_VALUE_INVALID`.
 - **Raw ECDSA takes 20, 32, 48 or 64 bytes.** The SDK infers the hash from
   the input length, so `CKM_ECDSA` input of any other length (SHA-224's 28
   bytes among them) returns `CKR_DATA_LEN_RANGE`. The module neither pads nor

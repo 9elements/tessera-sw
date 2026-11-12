@@ -332,6 +332,7 @@ CK_RV tsra_pkcs11_ec_keygen_check(
     CK_BBOOL derive = CK_FALSE;
     CK_BBOOL sensitive = CK_TRUE;
     CK_BBOOL extractable = CK_FALSE;
+    CK_BBOOL always_auth = CK_FALSE;
     for (CK_ULONG i = 0; (rv == CKR_OK) && (i < priv_count); i++)
     {
         rv = check_common(priv, i, why);
@@ -364,6 +365,17 @@ CK_RV tsra_pkcs11_ec_keygen_check(
             /* Device keys only ever exist masked. */
             *why = "the private key must be sensitive and unextractable";
             rv = CKR_TEMPLATE_INCONSISTENT;
+        }
+        if (rv == CKR_OK)
+        {
+            rv = read_bool(&priv[i], CKA_ALWAYS_AUTHENTICATE, &always_auth);
+        }
+        if ((rv == CKR_OK) && always_auth)
+        {
+            /* Nothing would enforce it: there is no CKU_CONTEXT_SPECIFIC login. */
+            *why = "CKA_ALWAYS_AUTHENTICATE is not supported: the token has no "
+                   "context-specific login";
+            rv = CKR_ATTRIBUTE_VALUE_INVALID;
         }
     }
     if (rv != CKR_OK)
