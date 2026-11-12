@@ -967,6 +967,21 @@ int main(void)
         "seal: once the old keys unmask again, their records open again"
     );
 
+    /* A device or session failure fails the search: skipping the record would
+     * show an existing private object as missing. */
+    void *failed = NULL;
+    fake_gcm_fail = CKR_DEVICE_ERROR;
+    CHECK(
+        s.ops->find_init(s.ctx, SEAL_SLOT, CK_TRUE, NULL, 0, &failed) == CKR_DEVICE_ERROR,
+        "seal: a device failure fails the search"
+    );
+    fake_gcm_fail = CKR_USER_NOT_LOGGED_IN;
+    CHECK(
+        s.ops->find_init(s.ctx, SEAL_SLOT, CK_TRUE, NULL, 0, &failed) == CKR_USER_NOT_LOGGED_IN,
+        "seal: so does a session the device no longer knows"
+    );
+    fake_gcm_fail = CKR_OK;
+
     /* Tampering, a wrong key, a forged clear record and an old format. */
     f1 = slurp(path2, &flen1);
     if (f1 != NULL)

@@ -43,6 +43,8 @@
 
 static uint32_t fake_epoch = 1;
 static uint32_t fake_keys_made = 0;
+/* When not CKR_OK, every GCM call fails with it: a device or session failure. */
+static CK_RV fake_gcm_fail = CKR_OK;
 static char fake_log_last[512];
 
 static inline uint64_t fake_fnv(uint64_t h, const unsigned char *p, size_t n)
@@ -118,6 +120,10 @@ static inline CK_RV fake_gcm(
 )
 {
     (void)slot;
+    if (fake_gcm_fail != CKR_OK)
+    {
+        return fake_gcm_fail;
+    }
     if ((key_len != FAKE_KEY_LEN) || (memcmp(key, &fake_epoch, sizeof(fake_epoch)) != 0))
     {
         return CKR_KEY_HANDLE_INVALID;
