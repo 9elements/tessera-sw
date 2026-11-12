@@ -200,6 +200,21 @@ static void test_params(void)
             CKR_ATTRIBUTE_VALUE_INVALID,
         "three length bytes -> CKR_ATTRIBUTE_VALUE_INVALID"
     );
+    /* The P-256 OID with its length in a long form DER does not allow. */
+    static const CK_BYTE long_form_short_len[] = { 0x06, 0x81, 0x08, 0x2a, 0x86, 0x48,
+                                                   0xce, 0x3d, 0x03, 0x01, 0x07 };
+    CHECK(
+        tsra_pkcs11_ec_params_curve(long_form_short_len, sizeof(long_form_short_len), &curve) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "a long-form length below 128 -> CKR_ATTRIBUTE_VALUE_INVALID"
+    );
+    static const CK_BYTE leading_zero_len[] = { 0x06, 0x82, 0x00, 0x08, 0x2a, 0x86,
+                                                0x48, 0xce, 0x3d, 0x03, 0x01, 0x07 };
+    CHECK(
+        tsra_pkcs11_ec_params_curve(leading_zero_len, sizeof(leading_zero_len), &curve) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "a length with a leading zero byte -> CKR_ATTRIBUTE_VALUE_INVALID"
+    );
     CHECK(
         tsra_pkcs11_ec_params_curve(OID_P256, 0, &curve) == CKR_ATTRIBUTE_VALUE_INVALID,
         "an empty value -> CKR_ATTRIBUTE_VALUE_INVALID"

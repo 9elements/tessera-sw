@@ -61,7 +61,9 @@ static const curve_info *find_curve(tsra_pkcs11_ec_curve_t curve)
 /*
  * Read one DER element at *p (before `end`): its tag, and its content as
  * *val / *val_len. Definite lengths up to two length bytes, which covers
- * every value here. *p moves past the element. false if it does not fit.
+ * every value here, in their minimal DER form: the long form only from 128
+ * on and without a leading zero byte. *p moves past the element. false if it
+ * does not fit or is not DER.
  */
 static bool der_next(
     const CK_BYTE **p,
@@ -81,7 +83,7 @@ static bool der_next(
     if ((len & DER_LONG_FORM) != 0)
     {
         CK_ULONG n = len & ~(CK_ULONG)DER_LONG_FORM;
-        if ((n == 0) || (n > DER_MAX_LEN_BYTES) || ((CK_ULONG)(end - q) < n))
+        if ((n == 0) || (n > DER_MAX_LEN_BYTES) || ((CK_ULONG)(end - q) < n) || (*q == 0))
         {
             return false;
         }
@@ -89,6 +91,10 @@ static bool der_next(
         for (CK_ULONG i = 0; i < n; i++)
         {
             len = (len << 8) | *q++;
+        }
+        if (len < DER_LONG_FORM)
+        {
+            return false; /* DER writes it in the short form */
         }
     }
     if ((CK_ULONG)(end - q) < len)
