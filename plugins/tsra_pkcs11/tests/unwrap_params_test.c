@@ -602,6 +602,13 @@ static void test_pair_check(void)
             (pair(pub, 2, closed, 3) == CKR_OK),
         "the private key is sensitive and unextractable"
     );
+    CK_ATTRIBUTE always_auth[] = { priv[0], ATTR(CKA_ALWAYS_AUTHENTICATE, g_true) };
+    CK_ATTRIBUTE no_always_auth[] = { priv[0], ATTR(CKA_ALWAYS_AUTHENTICATE, g_false) };
+    CHECK(
+        (pair(pub, 2, always_auth, 2) == CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (pair(pub, 2, no_always_auth, 2) == CKR_OK),
+        "CKA_ALWAYS_AUTHENTICATE TRUE -> CKR_ATTRIBUTE_VALUE_INVALID (no context-specific login)"
+    );
     CK_MECHANISM_TYPE wrap_mech = CKM_RSA_AES_KEY_WRAP;
     CK_MECHANISM_TYPE mixed[] = { CKM_RSA_AES_KEY_WRAP, CKM_RSA_PKCS_OAEP };
     CK_ATTRIBUTE allowed_ok[] = { priv[0], ATTR(CKA_ALLOWED_MECHANISMS, wrap_mech) };
