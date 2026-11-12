@@ -1027,6 +1027,16 @@ static void test_public_keys(void)
             (create(rsa_no_modulus, COUNT(rsa_no_modulus)) == CKR_TEMPLATE_INCOMPLETE),
         "an RSA key without its exponent or its modulus -> TEMPLATE_INCOMPLETE"
     );
+    CK_ATTRIBUTE rsa_empty_n[] = { rsa_ok[0], rsa_ok[1], { CKA_MODULUS, NULL, 0 }, rsa_ok[3] };
+    CK_ATTRIBUTE rsa_empty_e[] = { rsa_ok[0],
+                                   rsa_ok[1],
+                                   rsa_ok[2],
+                                   { CKA_PUBLIC_EXPONENT, NULL, 0 } };
+    CHECK(
+        (create(rsa_empty_n, COUNT(rsa_empty_n)) == CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (create(rsa_empty_e, COUNT(rsa_empty_e)) == CKR_ATTRIBUTE_VALUE_INVALID),
+        "an empty RSA modulus or exponent -> VALUE_INVALID"
+    );
     CK_KEY_TYPE dsa = CKK_DSA;
     CK_ATTRIBUTE other[] = { ATTR(CKA_CLASS, g_public), ATTR(CKA_KEY_TYPE, dsa) };
     CK_ATTRIBUTE untyped[] = { ATTR(CKA_CLASS, g_public), ATTR(CKA_LABEL, g_label) };
