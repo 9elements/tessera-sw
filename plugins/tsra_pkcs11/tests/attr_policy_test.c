@@ -984,6 +984,17 @@ static void test_public_keys(void)
         create_ec(p256, sizeof(p256), longer, n256 + 1) == CKR_ATTRIBUTE_VALUE_INVALID,
         "a byte after the OCTET STRING -> VALUE_INVALID"
     );
+    /* The P-256 point with its length in a form DER does not allow: the long
+     * form below 128, and a leading zero length byte. */
+    CK_BYTE long_form[sizeof(pt256) + 1] = { 0x04, 0x81 };
+    memcpy(long_form + 2, pt256 + 1, n256 - 1);
+    CK_BYTE zero_len[sizeof(pt256) + 2] = { 0x04, 0x82, 0x00 };
+    memcpy(zero_len + 3, pt256 + 1, n256 - 1);
+    CHECK(
+        (create_ec(p256, sizeof(p256), long_form, n256 + 1) == CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (create_ec(p256, sizeof(p256), zero_len, n256 + 2) == CKR_ATTRIBUTE_VALUE_INVALID),
+        "a non-minimal DER length -> VALUE_INVALID"
+    );
 
     CK_KEY_TYPE ec = CKK_EC;
     CK_ATTRIBUTE no_point[] = {
