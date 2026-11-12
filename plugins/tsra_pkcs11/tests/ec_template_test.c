@@ -560,6 +560,16 @@ static void test_check(void)
             (check_with(false, (CK_ATTRIBUTE)BOOL_ATTR(CKA_EXTRACTABLE, g_false), NULL) == CKR_OK),
         "sensitive and unextractable stated are fine"
     );
+    CHECK(
+        check_with(false, (CK_ATTRIBUTE)BOOL_ATTR(CKA_ALWAYS_AUTHENTICATE, g_true), NULL) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
+        "CKA_ALWAYS_AUTHENTICATE TRUE -> CKR_ATTRIBUTE_VALUE_INVALID (no context-specific login)"
+    );
+    CHECK(
+        check_with(false, (CK_ATTRIBUTE)BOOL_ATTR(CKA_ALWAYS_AUTHENTICATE, g_false), NULL) ==
+            CKR_OK,
+        "CKA_ALWAYS_AUTHENTICATE FALSE stated is fine"
+    );
     static CK_BYTE value[32];
     CHECK(
         check_with(false, (CK_ATTRIBUTE)ATTR(CKA_VALUE, value), NULL) == CKR_TEMPLATE_INCONSISTENT,
