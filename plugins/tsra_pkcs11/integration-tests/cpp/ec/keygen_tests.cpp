@@ -37,26 +37,20 @@ CK_RV gen_with(CK_SESSION_HANDLE s, const CK_ATTRIBUTE *pub_extra, const CK_ATTR
     std::vector<CK_BYTE> params = ec_curves()[0].params;
     CK_ATTRIBUTE pub[] = { { CKA_EC_PARAMS, params.data(), params.size() }, {} };
     CK_ATTRIBUTE priv[] = { { CKA_SIGN, &g_true, sizeof(g_true) }, {} };
+    CK_ULONG pub_count = 1; /* the entries filled so far */
+    CK_ULONG priv_count = 1;
     if (pub_extra != nullptr)
     {
-        pub[1] = *pub_extra;
+        pub[pub_count++] = *pub_extra;
     }
     if (priv_extra != nullptr)
     {
-        priv[1] = *priv_extra;
+        priv[priv_count++] = *priv_extra;
     }
     CK_OBJECT_HANDLE hpub = 0;
     CK_OBJECT_HANDLE hpriv = 0;
-    return p11()->C_GenerateKeyPair(
-        s,
-        &g_ec_keygen,
-        pub,
-        (pub_extra != nullptr) ? 2 : 1,
-        priv,
-        (priv_extra != nullptr) ? 2 : 1,
-        &hpub,
-        &hpriv
-    );
+    return p11()
+        ->C_GenerateKeyPair(s, &g_ec_keygen, pub, pub_count, priv, priv_count, &hpub, &hpriv);
 }
 
 } // namespace
@@ -138,10 +132,13 @@ TEST_F(ec_keygen, every_curve_gives_a_point_on_the_curve)
         ASSERT_CKR_OK(get_bytes(s_, pub, CKA_EC_POINT, der));
         size_t point_len = 1 + (2 * c.coord);
         // A DER OCTET STRING around the uncompressed point: 67, 99 or 136 bytes.
-        EXPECT_EQ(point_len + ((point_len < 0x80) ? 2 : 3), der.size());
+        EXPECT_EQ(
+            point_len + ((point_len <= kDerShortMax) ? kDerHeaderShort : kDerHeaderLong),
+            der.size()
+        );
         std::vector<CK_BYTE> point = ec_point(s_, pub);
         ASSERT_EQ(point_len, point.size());
-        EXPECT_EQ(0x04, point[0]) << "uncompressed";
+        EXPECT_EQ(kEcUncompressed, point[0]) << "uncompressed";
         EXPECT_NO_THROW(host::ec_public(c.name, point)) << "the point is on the curve";
 
         for (CK_OBJECT_HANDLE h : { pub, priv })

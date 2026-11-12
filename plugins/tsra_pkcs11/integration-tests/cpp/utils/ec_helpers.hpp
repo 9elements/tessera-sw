@@ -13,6 +13,17 @@
 
 #include "utils/module.hpp"
 
+/// DER around an EC point: the OCTET STRING tag, then the length in one byte
+/// up to kDerShortMax, or kDerLen1 and one length byte beyond (enough for every
+/// point here), so a header of kDerHeaderShort or kDerHeaderLong bytes.
+constexpr CK_BYTE kDerOctetString = 0x04;
+constexpr size_t kDerShortMax = 0x7f;
+constexpr CK_BYTE kDerLen1 = 0x81;
+constexpr size_t kDerHeaderShort = 2;
+constexpr size_t kDerHeaderLong = 3;
+/// The first byte of an uncompressed point.
+constexpr CK_BYTE kEcUncompressed = 0x04;
+
 /// One curve: its CKA_EC_PARAMS (the DER named-curve OID), its OpenSSL group
 /// name, and the length of a coordinate, and so of r and of s.
 struct EcCurve
@@ -96,13 +107,18 @@ inline CK_RV get_bytes(
 inline std::vector<CK_BYTE> ec_point(CK_SESSION_HANDLE s, CK_OBJECT_HANDLE pub)
 {
     std::vector<CK_BYTE> der;
-    if ((get_bytes(s, pub, CKA_EC_POINT, der) != CKR_OK) || (der.size() < 2) || (der[0] != 0x04))
+    if ((get_bytes(s, pub, CKA_EC_POINT, der) != CKR_OK) || (der.size() < kDerHeaderShort) ||
+        (der[0] != kDerOctetString))
     {
         return {};
     }
-    size_t header = (der[1] == 0x81) ? 3 : 2;
-    size_t len = (header == 3) ? der[2] : der[1];
-    if ((der.size() < header) || ((header + len) != der.size()))
+    size_t header = (der[1] == kDerLen1) ? kDerHeaderLong : kDerHeaderShort;
+    if (der.size() < header)
+    {
+        return {};
+    }
+    size_t len = (header == kDerHeaderLong) ? der[2] : der[1];
+    if ((header + len) != der.size())
     {
         return {};
     }
