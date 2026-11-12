@@ -226,12 +226,28 @@ static void object_name(CK_ULONG num, char *out, size_t outlen)
 
 /* ---- sealing ------------------------------------------------------------ */
 
-/* The codec's sealing callback, bound to the caller's slot. */
+/*
+ * The codec's sealing callback, bound to the record's place: its slot and
+ * object number follow the codec's additional data, so a record copied over
+ * another object or into another slot fails its tag like a tampered one. The
+ * place is not stored; the reader supplies it from where it found the record.
+ */
 typedef struct
 {
     const tsra_pkcs11_store_cipher *cipher;
     CK_SLOT_ID slot;
+    CK_ULONG num;
 } seal_ctx;
+
+#define P11_SEAL_PLACE_LEN 16 /* slot and object number, 8 bytes little-endian each */
+
+static void put_place(unsigned char *p, uint64_t v)
+{
+    for (size_t i = 0; i < 8; i++)
+    {
+        p[i] = (unsigned char)(v >> (8 * i));
+    }
+}
 
 static CK_RV seal_gcm(
     void *ctx,
@@ -246,7 +262,21 @@ static CK_RV seal_gcm(
 )
 {
     const seal_ctx *c = (const seal_ctx *)ctx;
-    return c->cipher->gcm(c->slot, encrypt, key, key_len, aad, aad_len, data, data_len, tag);
+    size_t full_len = aad_len + P11_SEAL_PLACE_LEN;
+    unsigned char *full = (unsigned char *)malloc(full_len);
+    if (full == NULL)
+    {
+        return CKR_HOST_MEMORY;
+    }
+    if (aad_len > 0)
+    {
+        memcpy(full, aad, aad_len);
+    }
+    put_place(full + aad_len, (uint64_t)c->slot);
+    put_place(full + aad_len + 8, (uint64_t)c->num);
+    CK_RV rv = c->cipher->gcm(c->slot, encrypt, key, key_len, full, full_len, data, data_len, tag);
+    free(full); /* header and masked key only: nothing to wipe */
+    return rv;
 }
 
 /* Encode `o` (sealed when `seal` is set) into a malloc'd *out the caller wipes
@@ -282,10 +312,11 @@ static CK_RV encode_record(
     return CKR_OK;
 }
 
-/* Encode a private record sealed with a key generated for it alone. */
+/* Encode private record `num` sealed with a key generated for it alone. */
 static CK_RV seal_record(
     const file_store *st,
     CK_SLOT_ID slot,
+    CK_ULONG num,
     const tsra_pkcs11_rec_object *o,
     unsigned char **out,
     size_t *out_len
@@ -298,7 +329,7 @@ static CK_RV seal_record(
     {
         return rv;
     }
-    seal_ctx sc = { st->cipher, slot };
+    seal_ctx sc = { st->cipher, slot, num };
     tsra_pkcs11_record_seal seal = { seal_gcm, &sc, key, key_len };
     rv = encode_record(o, &seal, out, out_len);
     tsra_pkcs11_wipe(key, key_len);
@@ -323,7 +354,7 @@ static CK_RV write_token_object(
 {
     unsigned char *buf = NULL;
     size_t blen = 0;
-    CK_RV rv = rec_bool(o, CKA_PRIVATE, CK_FALSE) ? seal_record(st, slot, o, &buf, &blen)
+    CK_RV rv = rec_bool(o, CKA_PRIVATE, CK_FALSE) ? seal_record(st, slot, num, o, &buf, &blen)
                                                   : encode_record(o, NULL, &buf, &blen);
     if (rv == CKR_OK)
     {
@@ -441,9 +472,10 @@ static CK_RV create_token_object(
 }
 
 /*
- * Read and decode <dir>/<name>. A sealed (private) record is invisible while
- * logged out and opened through the device otherwise. CKR_OBJECT_HANDLE_INVALID
- * when the object is absent or not visible, without leaking its existence.
+ * Read and decode <dir>/<name>, object `num`. A sealed (private) record is
+ * invisible while logged out and opened through the device otherwise.
+ * CKR_OBJECT_HANDLE_INVALID when the object is absent or not visible, without
+ * leaking its existence.
  */
 static CK_RV read_token_object(
     const file_store *st,
@@ -451,6 +483,7 @@ static CK_RV read_token_object(
     CK_BBOOL user_logged_in,
     const char *dir,
     const char *name,
+    CK_ULONG num,
     tsra_pkcs11_rec_object *out
 )
 {
@@ -485,7 +518,7 @@ static CK_RV read_token_object(
     }
     else if (rv == CKR_OK)
     {
-        seal_ctx sc = { st->cipher, slot };
+        seal_ctx sc = { st->cipher, slot, num };
         tsra_pkcs11_record_seal open = { seal_gcm, &sc, NULL, 0 };
         rv = tsra_pkcs11_record_decode(buf, blen, &open, out);
         /* A record key the device does not unmask hides the object from this
@@ -522,9 +555,10 @@ static CK_RV load_visible_token_object(
     {
         return rv;
     }
+    CK_ULONG num = h & ~P11_FILE_TOKEN_FLAG;
     char name[P11_FILE_OBJ_NAME_LEN];
-    object_name(h & ~P11_FILE_TOKEN_FLAG, name, sizeof(name));
-    return read_token_object(st, slot, user_logged_in, dir, name, out);
+    object_name(num, name, sizeof(name));
+    return read_token_object(st, slot, user_logged_in, dir, name, num, out);
 }
 
 /* ---- vtable ops --------------------------------------------------------- */
@@ -889,7 +923,7 @@ static CK_RV collect_token_matches(
             continue;
         }
         tsra_pkcs11_rec_object o;
-        if (read_token_object(st, slot, user_logged_in, dir, e->d_name, &o) != CKR_OK)
+        if (read_token_object(st, slot, user_logged_in, dir, e->d_name, num, &o) != CKR_OK)
         {
             /* Removed mid-scan, invisible, or corrupt: skip it rather than fail
              * the whole scan. */

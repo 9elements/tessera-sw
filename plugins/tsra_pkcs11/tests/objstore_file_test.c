@@ -929,6 +929,22 @@ int main(void)
     free(before);
     free(f1);
 
+    /* A whole valid record copied over another object does not open there. */
+    size_t p1_len = 0;
+    unsigned char *p1_record = slurp(path2, &p1_len);
+    CHECK(
+        (p1_record != NULL) && (after != NULL) && spill(path2, after, flen2) &&
+            read_label(&s, SEAL_SLOT, CK_TRUE, p1, lbuf, sizeof(lbuf), &llen) ==
+                CKR_FUNCTION_FAILED &&
+            read_label(&s, SEAL_SLOT, CK_TRUE, p2, lbuf, sizeof(lbuf), &llen) == CKR_OK,
+        "seal: a record copied over another object is refused there"
+    );
+    if (p1_record != NULL)
+    {
+        spill(path2, p1_record, p1_len);
+        free(p1_record);
+    }
+
     /* The partition provisioned afresh: older record keys no longer unmask. */
     fake_epoch++;
     CHECK(

@@ -211,7 +211,10 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
   attributes and key body with it, and the module deletes the device key.
   The record holds the masked key, the ciphertext and the 16-byte tag. Its
   header (format version, attribute count, key body length) stays in clear
-  and is covered by the tag.
+  and is covered by the tag, as are the record's slot and object number,
+  which are not stored: a record copied over another object, or into another
+  slot, fails its tag. An older copy of the same record still opens; the
+  store does not detect a rollback.
 - Each key encrypts one record only, so the GCM nonce is fixed (all zero)
   and never repeats under a key. This needs no random generator, which the
   device does not offer the host, and no counter on disk. The cost is one
