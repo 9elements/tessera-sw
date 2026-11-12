@@ -328,6 +328,11 @@ static CK_RV half_check(bool priv, const CK_ATTRIBUTE *tmpl, CK_ULONG count, CK_
                          ? CKR_OK
                          : CKR_TEMPLATE_INCONSISTENT;
                 break;
+            case CKA_ALWAYS_AUTHENTICATE:
+                /* Nothing would enforce it: there is no CKU_CONTEXT_SPECIFIC login. */
+                rv = (*(const CK_BBOOL *)a->pValue == CK_FALSE) ? CKR_OK
+                                                                : CKR_ATTRIBUTE_VALUE_INVALID;
+                break;
             case CKA_ALLOWED_MECHANISMS:
                 rv = (a->ulValueLen > 0) ? CKR_OK : CKR_TEMPLATE_INCONSISTENT;
                 for (CK_ULONG m = 0;
