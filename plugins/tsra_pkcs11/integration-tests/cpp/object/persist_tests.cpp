@@ -28,6 +28,10 @@ const char kLabel[] = "persist-across-processes";
 const std::string kPayload = "token object payload";
 const char kPrivateLabel[] = "persist-private-label";
 const std::string kPrivateValue = "persist private value";
+/// Private values just under and over what one device AES-GCM call seals
+/// (16 KiB with the record header).
+constexpr size_t kPrivateValueThatFits = 15 * 1024;
+constexpr size_t kPrivateValueTooLarge = 17 * 1024;
 
 /// Create a token data object with `label` and `value`.
 CK_RV create_data(
@@ -249,6 +253,24 @@ TEST_F(persist, tampered_private_record_is_refused)
 
     write_record(data);
     EXPECT_EQ(kPrivateValue, read_value(s_, obj)) << "the untouched record reads again";
+}
+
+TEST_F(persist, a_private_record_is_sealed_up_to_the_device_limit)
+{
+    CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
+    EXPECT_CKR(
+        CKR_DEVICE_MEMORY,
+        create_data(s_, CK_TRUE, kPrivateLabel, std::string(kPrivateValueTooLarge, 'p'), &obj)
+    );
+    EXPECT_EQ(CK_INVALID_HANDLE, obj);
+
+    const std::string big(kPrivateValueThatFits, 'p');
+    ASSERT_CKR_OK(create_data(s_, CK_TRUE, kPrivateLabel, big, &obj));
+    std::string back(big.size(), '\0');
+    CK_ATTRIBUTE value = { CKA_VALUE, back.data(), static_cast<CK_ULONG>(back.size()) };
+    ASSERT_CKR_OK(p11()->C_GetAttributeValue(s_, obj, &value, 1));
+    EXPECT_EQ(big.size(), value.ulValueLen);
+    EXPECT_TRUE(big == back) << "the value reads back unchanged";
 }
 
 TEST_F(persist, a_second_process_reads_the_private_object)

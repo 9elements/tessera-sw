@@ -38,7 +38,9 @@ the spec requires). Implemented so far:
   The file store keeps a token object in a record of at most 256 KiB,
   attribute values, masked key body and, for a private object, its seal
   included; a larger one is `CKR_DEVICE_MEMORY`. Private token objects are
-  sealed (see Private objects at rest). `C_CreateObject` needs `CKA_CLASS`
+  sealed (see Private objects at rest) in one device AES-GCM call, which
+  takes at most 16 KiB with the record header, so a private record is
+  `CKR_DEVICE_MEMORY` beyond that. `C_CreateObject` needs `CKA_CLASS`
   (`CKR_TEMPLATE_INCOMPLETE`) naming a data object, a certificate or a key
   (any other class is `CKR_ATTRIBUTE_VALUE_INVALID`), creates no secret or
   private key (see Deviations), and refuses the attributes only the token

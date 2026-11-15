@@ -81,6 +81,12 @@ tsra_pkcs11_session_t *tsra_pkcs11_session_lookup(CK_SESSION_HANDLE h)
 /* Every record key encrypts one record only, so a fixed IV never repeats under a key. */
 static const CK_BYTE P11_STORE_IV[AES_GCM_IV_LEN] = { 0 };
 
+/* One device AES-GCM call takes at most 16 KiB of AAD and data together, the
+ * AAD padded to 32-byte blocks: at most 16 bytes more, then rounded up. */
+#define P11_STORE_GCM_MAX (16 * 1024)
+#define P11_STORE_GCM_AAD_BLOCK 32
+#define P11_STORE_GCM_AAD_PAD (P11_STORE_GCM_AAD_BLOCK / 2)
+
 /* The device session of `slot`'s login, which every record key call runs in. */
 static uint32_t store_session(CK_SLOT_ID slot)
 {
@@ -120,6 +126,12 @@ static CK_RV store_gcm(
     if (session == 0)
     {
         return CKR_USER_NOT_LOGGED_IN;
+    }
+    CK_ULONG padded_aad = (aad_len + P11_STORE_GCM_AAD_PAD + P11_STORE_GCM_AAD_BLOCK - 1) /
+                          P11_STORE_GCM_AAD_BLOCK * P11_STORE_GCM_AAD_BLOCK;
+    if ((padded_aad > P11_STORE_GCM_MAX) || (data_len > P11_STORE_GCM_MAX - padded_aad))
+    {
+        return CKR_DEVICE_MEMORY; /* as a record over the file store's limit */
     }
     uint32_t hkey = 0;
     CK_RV rv = tsra_pkcs11_key_aes_unmask(session, TSRA_PKCS11_KIND_AES_GCM, key, key_len, &hkey);
