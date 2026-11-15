@@ -45,6 +45,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -239,13 +240,14 @@ typedef struct
     CK_ULONG num;
 } seal_ctx;
 
-#define P11_SEAL_PLACE_LEN 16 /* slot and object number, 8 bytes little-endian each */
+#define P11_SEAL_PLACE_FIELD_LEN sizeof(uint64_t)         /* one number, little-endian */
+#define P11_SEAL_PLACE_LEN (2 * P11_SEAL_PLACE_FIELD_LEN) /* slot, then object number */
 
 static void put_place(unsigned char *p, uint64_t v)
 {
-    for (size_t i = 0; i < 8; i++)
+    for (size_t i = 0; i < P11_SEAL_PLACE_FIELD_LEN; i++)
     {
-        p[i] = (unsigned char)(v >> (8 * i));
+        p[i] = (unsigned char)(v >> (CHAR_BIT * i));
     }
 }
 
@@ -273,7 +275,7 @@ static CK_RV seal_gcm(
         memcpy(full, aad, aad_len);
     }
     put_place(full + aad_len, (uint64_t)c->slot);
-    put_place(full + aad_len + 8, (uint64_t)c->num);
+    put_place(full + aad_len + P11_SEAL_PLACE_FIELD_LEN, (uint64_t)c->num);
     CK_RV rv = c->cipher->gcm(c->slot, encrypt, key, key_len, full, full_len, data, data_len, tag);
     free(full); /* header and masked key only: nothing to wipe */
     return rv;

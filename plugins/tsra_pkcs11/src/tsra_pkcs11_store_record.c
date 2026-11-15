@@ -119,7 +119,7 @@ CK_RV tsra_pkcs11_record_encode(
     }
 
     /* Required size, accumulated so it cannot overflow the u32 length fields. */
-    if (obj->attr_count > 0xFFFFFFFFu || obj->body_len > 0xFFFFFFFFu)
+    if (obj->attr_count > UINT32_MAX || obj->body_len > UINT32_MAX)
     {
         return CKR_DATA_LEN_RANGE;
     }
@@ -131,7 +131,7 @@ CK_RV tsra_pkcs11_record_encode(
         {
             return CKR_ARGUMENTS_BAD;
         }
-        if (a->type > 0xFFFFFFFFu || a->len > 0xFFFFFFFFu)
+        if (a->type > UINT32_MAX || a->len > UINT32_MAX)
         {
             return CKR_DATA_LEN_RANGE;
         }
@@ -142,7 +142,7 @@ CK_RV tsra_pkcs11_record_encode(
     uint64_t need = 0;
     if (seal != NULL)
     {
-        if (seal->key_len > 0xFFFFFFFFu)
+        if (seal->key_len > UINT32_MAX)
         {
             return CKR_DATA_LEN_RANGE;
         }
@@ -150,7 +150,7 @@ CK_RV tsra_pkcs11_record_encode(
         need = P11_RECORD_TAG_LEN;
     }
     need += prefix + payload;
-    if (need > 0xFFFFFFFFu) /* total_len is a u32 field */
+    if (need > UINT32_MAX) /* total_len is a u32 field */
     {
         return CKR_DATA_LEN_RANGE;
     }
