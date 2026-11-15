@@ -311,6 +311,15 @@ int main(void)
         tsra_pkcs11_objstore_file_create(&s, &cfg, NULL) == CKR_ARGUMENTS_BAD,
         "file store needs the device cipher"
     );
+    tsra_pkcs11_store_cipher no_keygen = FAKE_CIPHER;
+    no_keygen.key_generate = NULL;
+    tsra_pkcs11_store_cipher no_gcm = FAKE_CIPHER;
+    no_gcm.gcm = NULL;
+    CHECK(
+        tsra_pkcs11_objstore_file_create(&s, &cfg, &no_keygen) == CKR_ARGUMENTS_BAD &&
+            tsra_pkcs11_objstore_file_create(&s, &cfg, &no_gcm) == CKR_ARGUMENTS_BAD,
+        "file store needs both cipher callbacks"
+    );
     CHECK(
         tsra_pkcs11_objstore_file_create(&s, &cfg, &FAKE_CIPHER) == CKR_OK,
         "file store constructs"

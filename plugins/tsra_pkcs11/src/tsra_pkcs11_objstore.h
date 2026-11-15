@@ -210,7 +210,8 @@ typedef struct
  * Construct the persistent file backend into `out`, rooted at cfg->store_dir.
  * Objects are written through to disk so token objects survive a process restart
  * and are visible to other processes sharing the directory
- * (tsra_pkcs11_objstore_file.c). `cipher` is borrowed and must outlive the store.
+ * (tsra_pkcs11_objstore_file.c). `cipher` is borrowed and must outlive the store;
+ * one without both callbacks is CKR_ARGUMENTS_BAD.
  */
 CK_RV tsra_pkcs11_objstore_file_create(
     tsra_pkcs11_objstore *out,

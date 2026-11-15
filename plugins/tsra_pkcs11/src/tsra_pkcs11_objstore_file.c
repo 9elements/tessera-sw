@@ -1293,7 +1293,8 @@ CK_RV tsra_pkcs11_objstore_file_create(
     const tsra_pkcs11_store_cipher *cipher
 )
 {
-    if ((out == NULL) || (cfg == NULL) || (cipher == NULL))
+    if ((out == NULL) || (cfg == NULL) || (cipher == NULL) || (cipher->key_generate == NULL) ||
+        (cipher->gcm == NULL))
     {
         return CKR_ARGUMENTS_BAD;
     }
