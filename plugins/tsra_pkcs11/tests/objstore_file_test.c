@@ -1040,6 +1040,21 @@ int main(void)
                 CKR_FUNCTION_FAILED,
         "seal: a clear record claiming CKA_PRIVATE is refused"
     );
+    CK_OBJECT_CLASS kcls = CKO_PRIVATE_KEY;
+    tsra_pkcs11_rec_attr clear_key_attrs[] = {
+        { CKA_CLASS, (unsigned char *)&kcls, sizeof(kcls) },
+        { CKA_TOKEN, &ck_true, sizeof(CK_BBOOL) },
+        { CKA_PRIVATE, &ck_false, sizeof(CK_BBOOL) },
+    };
+    tsra_pkcs11_rec_object clear_key = { clear_key_attrs, 3, NULL, 0 };
+    fl = sizeof(fbuf);
+    snprintf(path, sizeof(path), "%s/902.object", seal_dir);
+    CHECK(
+        tsra_pkcs11_record_encode(&clear_key, NULL, fbuf, &fl) == CKR_OK && spill(path, fbuf, fl) &&
+            read_label(&s, SEAL_SLOT, CK_TRUE, TOKEN_FLAG | 902, lbuf, sizeof(lbuf), &llen) ==
+                CKR_FUNCTION_FAILED,
+        "seal: a clear record holding a private key is refused"
+    );
     forged_attrs[2].value = &ck_false;
     fl = sizeof(fbuf);
     snprintf(path, sizeof(path), "%s/901.object", seal_dir);

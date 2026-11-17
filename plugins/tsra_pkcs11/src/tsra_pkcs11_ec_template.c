@@ -339,6 +339,7 @@ CK_RV tsra_pkcs11_ec_keygen_check(
     CK_BBOOL sensitive = CK_TRUE;
     CK_BBOOL extractable = CK_FALSE;
     CK_BBOOL always_auth = CK_FALSE;
+    CK_BBOOL priv_private = CK_TRUE;
     for (CK_ULONG i = 0; (rv == CKR_OK) && (i < priv_count); i++)
     {
         rv = check_common(priv, i, why);
@@ -357,6 +358,10 @@ CK_RV tsra_pkcs11_ec_keygen_check(
         if (rv == CKR_OK)
         {
             rv = read_bool(&priv[i], CKA_DERIVE, &derive);
+        }
+        if (rv == CKR_OK)
+        {
+            rv = read_bool(&priv[i], CKA_PRIVATE, &priv_private);
         }
         if (rv == CKR_OK)
         {
@@ -405,6 +410,12 @@ CK_RV tsra_pkcs11_ec_keygen_check(
          (memcmp(priv_params->pValue, out->params->pValue, out->params->ulValueLen) != 0)))
     {
         *why = "the private CKA_EC_PARAMS differs from the public one";
+        return CKR_TEMPLATE_INCONSISTENT;
+    }
+    if (out->priv_token && !priv_private)
+    {
+        /* Only a sealed record guards the attributes that limit the key. */
+        *why = "a token private key must be private: the file store seals only private objects";
         return CKR_TEMPLATE_INCONSISTENT;
     }
     if (sign == derive)

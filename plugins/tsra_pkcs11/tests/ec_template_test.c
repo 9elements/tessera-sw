@@ -585,6 +585,18 @@ static void test_check(void)
             CKR_OK,
         "CKA_ALWAYS_AUTHENTICATE FALSE stated is fine"
     );
+    CHECK(
+        check_with(false, (CK_ATTRIBUTE)BOOL_ATTR(CKA_PRIVATE, g_false), NULL) == CKR_OK,
+        "a session private key may be public"
+    );
+    base_pair(&t);
+    t.priv[t.priv_n++] = (CK_ATTRIBUTE)BOOL_ATTR(CKA_TOKEN, g_true);
+    t.priv[t.priv_n++] = (CK_ATTRIBUTE)BOOL_ATTR(CKA_PRIVATE, g_false);
+    why = NULL;
+    CHECK(
+        (check_pair(&t, &kg, &why) == CKR_TEMPLATE_INCONSISTENT) && (why != NULL),
+        "a token private key that is not private -> inconsistent, with a reason"
+    );
     static CK_BYTE value[32];
     CHECK(
         check_with(false, (CK_ATTRIBUTE)ATTR(CKA_VALUE, value), NULL) == CKR_TEMPLATE_INCONSISTENT,

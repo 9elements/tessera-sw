@@ -377,6 +377,19 @@ TEST_F(ec_keygen, token_pair_needs_a_read_write_session)
     EXPECT_CKR_OK(p11()->C_CloseSession(ro));
 }
 
+TEST_F(ec_keygen, a_token_private_key_must_be_private)
+{
+    CK_OBJECT_HANDLE pub = 0;
+    CK_OBJECT_HANDLE priv = 0;
+    EXPECT_CKR(
+        CKR_TEMPLATE_INCONSISTENT,
+        gen_ec_pair(s_, ec_curves()[0], true, CK_TRUE, CK_FALSE, "public-token", &pub, &priv)
+    ) << "only a sealed record guards the attributes that limit the key";
+    EXPECT_CKR_OK(
+        gen_ec_pair(s_, ec_curves()[0], true, CK_FALSE, CK_FALSE, "public-session", &pub, &priv)
+    ) << "a session private key may be public";
+}
+
 TEST_F(ec_keygen, the_public_key_is_visible_while_logged_out)
 {
     CK_OBJECT_HANDLE pub = 0;

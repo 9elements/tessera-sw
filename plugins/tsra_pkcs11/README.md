@@ -122,10 +122,15 @@ the spec requires). Implemented so far:
   `CKR_CURVE_NOT_SUPPORTED`; `C_GetMechanismInfo` says so with `CKF_EC_F_P`,
   `CKF_EC_OID` and `CKF_EC_UNCOMPRESS` on every EC mechanism. The private key
   signs or derives, never both (see Deviations). `CKA_EC_POINT` is the
-  uncompressed point in a DER OCTET STRING. The private key is private,
-  sensitive, unextractable and local; the public key is not private unless
-  the template says so, and is readable while logged out. Both objects keep the pair's masked blob as their key body: the
-  SDK verifies only with a device key, and only unmasking the pair gives one.
+  uncompressed point in a DER OCTET STRING. The private key is sensitive,
+  unextractable and local, and private: only a session private key may set
+  `CKA_PRIVATE` FALSE (see Deviations). The public key is not private unless
+  the template says so, and is readable while logged out. Both objects keep
+  the pair's masked blob as their key body: the SDK verifies only with a
+  device key, and only unmasking the pair gives one. The module only ever
+  verifies with the public key's copy. Deleting the private key does not
+  revoke that copy; like every masked key, it unmasks for the partition's
+  login until the partition's masking key changes.
 - **`C_Sign*` / `C_Verify*` (`CKM_ECDSA`, `CKM_ECDSA_SHA1`, `_SHA256`,
   `_SHA384`, `_SHA512`)**: each init unmasks the pair into device keys that
   live as long as the operation, like the cipher operations. A signature is
@@ -185,6 +190,12 @@ the spec requires). Implemented so far:
 - **No per-operation login.** The token has no context-specific login
   (`CKU_CONTEXT_SPECIFIC`) that would enforce `CKA_ALWAYS_AUTHENTICATE`, so a
   private-key template with it TRUE returns `CKR_ATTRIBUTE_VALUE_INVALID`.
+- **Token private keys are always private.** The file store authenticates
+  only private records, and a key's limits (`CKA_SIGN`,
+  `CKA_ALLOWED_MECHANISMS`) are attributes in its record. So a token
+  private-key template with `CKA_PRIVATE` FALSE returns
+  `CKR_TEMPLATE_INCONSISTENT`, and a clear record holding a private key,
+  which only an edit of the store can make, is refused like a tampered one.
 - **Raw ECDSA takes 20, 32, 48 or 64 bytes.** The SDK infers the hash from
   the input length, so `CKM_ECDSA` input of any other length (SHA-224's 28
   bytes among them) returns `CKR_DATA_LEN_RANGE`. The module neither pads nor
@@ -267,7 +278,7 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
   device key generation per private write.
 - Reading a private object needs the login, whose device session unmasks the
   record's key and decrypts the record. A record whose tag does not match, or
-  a clear record that claims `CKA_PRIVATE`, is refused:
+  a clear record that claims `CKA_PRIVATE` or holds a private key, is refused:
   `CKR_FUNCTION_FAILED`. So is every search that meets it, with a debug line
   naming the file, until the record is removed: the device reports a tag
   mismatch and its own fault alike, so leaving the record out could hide an
@@ -281,7 +292,8 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
 - The record format is version 2. A version-1 record, from an earlier build,
   is refused with a debug line; remove its slot directory.
 
-Public objects are not authenticated.
+Public objects are not authenticated. An EC public key's record holds the
+pair's masked blob, but the module only verifies with it.
 
 ## Layering
 
