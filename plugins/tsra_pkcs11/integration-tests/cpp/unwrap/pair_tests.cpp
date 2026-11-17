@@ -329,7 +329,7 @@ TEST_F(unwrapping_pair_persist, token_pair_survives_finalize_initialize)
     ));
 }
 
-TEST_F(unwrapping_pair_persist, another_partitions_pair_is_refused_at_unwrap)
+TEST_F(unwrapping_pair_persist, another_partitions_private_key_stays_hidden)
 {
     EMU_ONLY("needs a second simulator, whose partition has an unwrapping key of its own");
     if (PrivateSimulator::server_bin().empty())
@@ -348,31 +348,23 @@ TEST_F(unwrapping_pair_persist, another_partitions_pair_is_refused_at_unwrap)
     ASSERT_EQ(0, child.exit_code);
     ASSERT_EQ("1", child.values["ran"]);
 
+    // Its private key is sealed with a record key only that partition unmasks, so
+    // it cannot be found here, let alone used to unwrap. The public key is clear.
     CK_OBJECT_CLASS cls = CKO_PRIVATE_KEY;
     CK_ATTRIBUTE match = { CKA_CLASS, &cls, sizeof(cls) };
-    ASSERT_CKR_OK(p11()->C_FindObjectsInit(s_, &match, 1));
-    CK_OBJECT_HANDLE theirs = CK_INVALID_HANDLE;
+    CK_OBJECT_HANDLE found = CK_INVALID_HANDLE;
     CK_ULONG count = 0;
-    ASSERT_CKR_OK(p11()->C_FindObjects(s_, &theirs, 1, &count));
+    ASSERT_CKR_OK(p11()->C_FindObjectsInit(s_, &match, 1));
+    ASSERT_CKR_OK(p11()->C_FindObjects(s_, &found, 1, &count));
     ASSERT_CKR_OK(p11()->C_FindObjectsFinal(s_));
-    ASSERT_EQ(1u, count);
+    EXPECT_EQ(0u, count) << "another partition's private key";
 
-    std::vector<CK_BYTE> n;
-    ASSERT_CKR_OK(get_bytes(s_, theirs, CKA_MODULUS, n));
-    host::Pkey key = host::rsa_public(n, { 0x01, 0x00, 0x01 });
-    RsaAesMechanism m;
-    CK_OBJECT_HANDLE aes = CK_INVALID_HANDLE;
-    EXPECT_CKR(
-        CKR_UNWRAPPING_KEY_HANDLE_INVALID,
-        unwrap_key(
-            s_,
-            theirs,
-            &m.mech,
-            host::rsa_aes_key_wrap(key.get(), "SHA256", host::Bytes(32, 0x22)),
-            CKM_AES_CBC,
-            &aes
-        )
-    );
+    cls = CKO_PUBLIC_KEY;
+    count = 0;
+    ASSERT_CKR_OK(p11()->C_FindObjectsInit(s_, &match, 1));
+    ASSERT_CKR_OK(p11()->C_FindObjects(s_, &found, 1, &count));
+    ASSERT_CKR_OK(p11()->C_FindObjectsFinal(s_));
+    EXPECT_EQ(1u, count) << "another partition's public key";
 }
 
 TEST_F(unwrapping_pair_child, makes_a_token_pair)

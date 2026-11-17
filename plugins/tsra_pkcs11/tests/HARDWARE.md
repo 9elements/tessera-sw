@@ -198,6 +198,6 @@ and the result of the last hardware run.
   `CKR_FUNCTION_FAILED`. Record how long the first call takes. A token pair
   from before the event still unwraps.
 - Cases: `unwrapping_pair.*`, `unwrapping_pair_persist.token_pair_survives_finalize_initialize`;
-  `unwrapping_pair_persist.another_partitions_pair_is_refused_at_unwrap` is
+  `unwrapping_pair_persist.another_partitions_private_key_stays_hidden` is
   simulator-only (it starts a second simulator, with a partition of its own).
 - Result: not run yet.
