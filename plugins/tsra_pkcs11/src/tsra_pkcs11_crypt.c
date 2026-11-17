@@ -581,6 +581,7 @@ static CK_RV cipher_init(
 
     CK_BYTE *body = NULL;
     CK_ULONG body_len = 0;
+    CK_ULONG body_cap = 0; /* the read may report a larger body_len if the record changed */
     cipher_op *op = NULL;
 
     rv = g_tsra_pkcs11.store.ops
@@ -648,7 +649,8 @@ static CK_RV cipher_init(
         goto cleanup;
     }
 
-    body = (CK_BYTE *)malloc(body_len);
+    body_cap = body_len;
+    body = (CK_BYTE *)malloc(body_cap);
     if (body == NULL)
     {
         rv = CKR_HOST_MEMORY;
@@ -702,7 +704,7 @@ static CK_RV cipher_init(
 cleanup:
     if (body != NULL)
     {
-        tsra_pkcs11_wipe(body, body_len);
+        tsra_pkcs11_wipe(body, body_cap);
         free(body);
     }
     tsra_pkcs11_cipher_op_free(op);

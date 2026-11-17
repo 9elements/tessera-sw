@@ -201,6 +201,7 @@ static CK_RV sign_init(
 
     CK_BYTE *body = NULL;
     CK_ULONG body_len = 0;
+    CK_ULONG body_cap = 0; /* the read may report a larger body_len if the record changed */
     sign_op *op = NULL;
     rv = g_tsra_pkcs11.store.ops
              ->get_key_body(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, hKey, NULL, &body_len);
@@ -222,7 +223,8 @@ static CK_RV sign_init(
     {
         goto cleanup;
     }
-    body = (CK_BYTE *)malloc(body_len);
+    body_cap = body_len;
+    body = (CK_BYTE *)malloc(body_cap);
     op = (sign_op *)calloc(1, sizeof(sign_op)); /* zeroed: no handles to release yet */
     if ((body == NULL) || (op == NULL))
     {
@@ -248,7 +250,7 @@ static CK_RV sign_init(
 cleanup:
     if (body != NULL)
     {
-        tsra_pkcs11_wipe(body, body_len);
+        tsra_pkcs11_wipe(body, body_cap);
         free(body);
     }
     tsra_pkcs11_sign_op_free(op);
