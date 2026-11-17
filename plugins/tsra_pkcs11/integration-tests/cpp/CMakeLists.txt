@@ -102,7 +102,11 @@ add_custom_command(
     OUTPUT ${WYCHEPROOF_INC}
     COMMAND Python3::Interpreter -I ${TSRA_PKCS11_ROOT}/tools/gen_wycheproof.py
         ${WYCHEPROOF_VECTORS} ${WYCHEPROOF_OUT}
-    DEPENDS ${TSRA_PKCS11_ROOT}/tools/gen_wycheproof.py
+    DEPENDS
+        ${TSRA_PKCS11_ROOT}/tools/gen_wycheproof.py
+        ${WYCHEPROOF_VECTORS}/aes_kwp_test.json
+        ${WYCHEPROOF_VECTORS}/aes_cbc_pkcs5_test.json
+        ${WYCHEPROOF_VECTORS}/aes_gcm_test.json
     COMMENT "Converting the Wycheproof vectors"
     VERBATIM
 )
