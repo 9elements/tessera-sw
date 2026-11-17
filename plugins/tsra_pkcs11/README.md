@@ -153,7 +153,7 @@ the spec requires). Implemented so far:
   `CKA_MODULUS_BITS`: `CKR_TEMPLATE_INCOMPLETE`). Both objects carry the
   modulus, the exponent, `CKA_ID` (the SHA-1 of the modulus) and
   `CKA_ALLOWED_MECHANISMS = { CKM_RSA_AES_KEY_WRAP }`; the private one is
-  sensitive and unextractable.
+  sensitive and unextractable, and private on the token (see Deviations).
 - **`C_UnwrapKey` (`CKM_RSA_AES_KEY_WRAP`)**: the only way a key from outside
   enters the token. The blob is the RSA-OAEP encryption of an AES
   key-encryption key under the unwrapping key, then the target key wrapped

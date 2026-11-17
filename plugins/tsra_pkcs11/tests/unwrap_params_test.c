@@ -609,6 +609,13 @@ static void test_pair_check(void)
             (pair(pub, 2, no_always_auth, 2) == CKR_OK),
         "CKA_ALWAYS_AUTHENTICATE TRUE -> CKR_ATTRIBUTE_VALUE_INVALID (no context-specific login)"
     );
+    CK_ATTRIBUTE public_session[] = { priv[0], ATTR(CKA_PRIVATE, g_false) };
+    CK_ATTRIBUTE public_token[] = { priv[0], ATTR(CKA_TOKEN, g_true), ATTR(CKA_PRIVATE, g_false) };
+    CHECK(
+        (pair(pub, 2, public_session, 2) == CKR_OK) &&
+            (pair(pub, 2, public_token, 3) == CKR_TEMPLATE_INCONSISTENT),
+        "a token private key must be private; a session one need not be"
+    );
     CK_MECHANISM_TYPE wrap_mech = CKM_RSA_AES_KEY_WRAP;
     CK_MECHANISM_TYPE mixed[] = { CKM_RSA_AES_KEY_WRAP, CKM_RSA_PKCS_OAEP };
     CK_ATTRIBUTE allowed_ok[] = { priv[0], ATTR(CKA_ALLOWED_MECHANISMS, wrap_mech) };

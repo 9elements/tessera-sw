@@ -267,6 +267,7 @@ static CK_RV half_check(bool priv, const CK_ATTRIBUTE *tmpl, CK_ULONG count, CK_
     CK_ATTRIBUTE_TYPE own = priv ? CKA_UNWRAP : CKA_WRAP;
     bool have_own = false;
     bool have_bits = false;
+    CK_BBOOL is_private = CK_TRUE;
     *token = CK_FALSE;
     CK_RV rv = tsra_pkcs11_tmpl_check_bounds(tmpl, count);
     for (CK_ULONG i = 0; (rv == CKR_OK) && (i < count); i++)
@@ -347,6 +348,9 @@ static CK_RV half_check(bool priv, const CK_ATTRIBUTE *tmpl, CK_ULONG count, CK_
             case CKA_TOKEN:
                 rv = tsra_pkcs11_tmpl_bool(a, token);
                 break;
+            case CKA_PRIVATE:
+                rv = tsra_pkcs11_tmpl_bool(a, &is_private);
+                break;
             default:
                 break; /* stored verbatim on the object */
             }
@@ -359,6 +363,10 @@ static CK_RV half_check(bool priv, const CK_ATTRIBUTE *tmpl, CK_ULONG count, CK_
     if (!have_own)
     {
         return CKR_TEMPLATE_INCONSISTENT;
+    }
+    if (priv && *token && !is_private)
+    {
+        return CKR_TEMPLATE_INCONSISTENT; /* only a sealed record guards a token private key */
     }
     return (priv || have_bits) ? CKR_OK : CKR_TEMPLATE_INCOMPLETE;
 }
