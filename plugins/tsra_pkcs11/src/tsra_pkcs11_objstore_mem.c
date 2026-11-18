@@ -572,7 +572,9 @@ static CK_RV mem_get_key_body(
     CK_BBOOL user_logged_in,
     CK_OBJECT_HANDLE h,
     CK_BYTE *blob,
-    CK_ULONG *len
+    CK_ULONG *len,
+    tsra_pkcs11_objstore_check check,
+    void *cctx
 )
 {
     mem_store *st = (mem_store *)ctx;
@@ -584,6 +586,11 @@ static CK_RV mem_get_key_body(
     if (o == NULL || !visible(o, slot, user_logged_in))
     {
         return CKR_OBJECT_HANDLE_INVALID;
+    }
+    CK_RV rv = (check != NULL) ? check(cctx, read_one, o) : CKR_OK;
+    if (rv != CKR_OK)
+    {
+        return rv;
     }
     if (blob == NULL)
     {

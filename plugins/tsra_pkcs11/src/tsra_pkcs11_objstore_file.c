@@ -1149,7 +1149,9 @@ static CK_RV get_key_body_token(
     CK_BBOOL user_logged_in,
     CK_OBJECT_HANDLE h,
     CK_BYTE *blob,
-    CK_ULONG *len
+    CK_ULONG *len,
+    tsra_pkcs11_objstore_check check,
+    void *cctx
 )
 {
     /* Brief lock: reading the record non-atomically vs. a concurrent
@@ -1168,6 +1170,16 @@ static CK_RV get_key_body_token(
     {
         tsra_pkcs11_store_unlock(lock_fd);
         return rv;
+    }
+    if (check != NULL)
+    {
+        rv = check(cctx, read_rec_one, &o);
+    }
+    if (rv != CKR_OK)
+    {
+        tsra_pkcs11_record_free(&o);
+        tsra_pkcs11_store_unlock(lock_fd);
+        return rv; /* refused: no length and no body */
     }
     if (blob == NULL)
     {
@@ -1197,7 +1209,9 @@ static CK_RV file_get_key_body(
     CK_BBOOL user_logged_in,
     CK_OBJECT_HANDLE h,
     CK_BYTE *blob,
-    CK_ULONG *len
+    CK_ULONG *len,
+    tsra_pkcs11_objstore_check check,
+    void *cctx
 )
 {
     file_store *st = (file_store *)ctx;
@@ -1207,9 +1221,10 @@ static CK_RV file_get_key_body(
     }
     if ((h & P11_FILE_TOKEN_FLAG) == 0)
     {
-        return st->mem.ops->get_key_body(st->mem.ctx, slot, user_logged_in, h, blob, len);
+        return st->mem.ops
+            ->get_key_body(st->mem.ctx, slot, user_logged_in, h, blob, len, check, cctx);
     }
-    return get_key_body_token(st, slot, user_logged_in, h, blob, len);
+    return get_key_body_token(st, slot, user_logged_in, h, blob, len, check, cctx);
 }
 
 /* Counts the decoded record the way mem_get_size counts a live object, so a

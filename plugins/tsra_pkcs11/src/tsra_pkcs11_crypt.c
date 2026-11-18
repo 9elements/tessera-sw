@@ -584,8 +584,16 @@ static CK_RV cipher_init(
     CK_ULONG body_cap = 0; /* the read may report a larger body_len if the record changed */
     cipher_op *op = NULL;
 
-    rv = g_tsra_pkcs11.store.ops
-             ->get_key_body(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, hKey, NULL, &body_len);
+    rv = g_tsra_pkcs11.store.ops->get_key_body(
+        g_tsra_pkcs11.store.ctx,
+        s->slot,
+        CK_TRUE,
+        hKey,
+        NULL,
+        &body_len,
+        NULL,
+        NULL
+    );
     if (rv == CKR_OBJECT_HANDLE_INVALID)
     {
         rv = CKR_KEY_HANDLE_INVALID; /* the handle names a key at this entry point */
@@ -656,8 +664,16 @@ static CK_RV cipher_init(
         rv = CKR_HOST_MEMORY;
         goto cleanup;
     }
-    rv = g_tsra_pkcs11.store.ops
-             ->get_key_body(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, hKey, body, &body_len);
+    rv = g_tsra_pkcs11.store.ops->get_key_body(
+        g_tsra_pkcs11.store.ctx,
+        s->slot,
+        CK_TRUE,
+        hKey,
+        body,
+        &body_len,
+        NULL,
+        NULL
+    );
     if (rv != CKR_OK)
     {
         goto cleanup;

@@ -43,45 +43,49 @@ void tsra_pkcs11_sign_op_free(void *op_ctx)
     free(op);
 }
 
-/* Read the fixed-size attribute `type` of key `h` into `value`. */
+/* The mechanism and direction check_key decides on. */
+typedef struct
+{
+    const tsra_pkcs11_sign_mech *sm;
+    bool sign;
+} key_check_ctx;
+
+/* Read the fixed-size attribute `type` of the record into `value`. */
 static CK_RV key_attr(
-    const tsra_pkcs11_session_t *s,
-    CK_OBJECT_HANDLE h,
+    tsra_pkcs11_objstore_reader read,
+    void *rctx,
     CK_ATTRIBUTE_TYPE type,
     void *value,
     CK_ULONG len
 )
 {
     CK_ATTRIBUTE a = { type, value, len };
-    CK_RV rv =
-        g_tsra_pkcs11.store.ops->get_attr(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h, &a, 1);
-    return (rv == CKR_OBJECT_HANDLE_INVALID) ? CKR_KEY_HANDLE_INVALID : rv;
+    return read(rctx, &a);
 }
 
 /*
- * Whether key `h` may run `sm` in the direction `sign`: a key of the
+ * Whether the key may run the mechanism in the direction asked: a key of the
  * mechanism's type, a private key with CKA_SIGN or a public key with
  * CKA_VERIFY, and the mechanism on its CKA_ALLOWED_MECHANISMS if it has one.
- * A missing or malformed attribute permits nothing.
+ * A missing or malformed attribute permits nothing. The store runs it on the
+ * record it returns the body from, so a record rewritten in between cannot
+ * pass the check with one version and supply the body from another.
  */
-static CK_RV check_key(
-    const tsra_pkcs11_session_t *s,
-    CK_OBJECT_HANDLE h,
-    const tsra_pkcs11_sign_mech *sm,
-    bool sign
-)
+static CK_RV check_key(void *cctx, tsra_pkcs11_objstore_reader read, void *rctx)
 {
+    const tsra_pkcs11_sign_mech *sm = ((const key_check_ctx *)cctx)->sm;
+    bool sign = ((const key_check_ctx *)cctx)->sign;
     CK_KEY_TYPE kt = CK_UNAVAILABLE_INFORMATION;
     CK_OBJECT_CLASS cls = CK_UNAVAILABLE_INFORMATION;
     CK_BBOOL allowed = CK_FALSE;
-    CK_RV rv = key_attr(s, h, CKA_KEY_TYPE, &kt, sizeof(kt));
+    CK_RV rv = key_attr(read, rctx, CKA_KEY_TYPE, &kt, sizeof(kt));
     if ((rv == CKR_OK) || (rv == CKR_ATTRIBUTE_TYPE_INVALID))
     {
-        rv = key_attr(s, h, CKA_CLASS, &cls, sizeof(cls));
+        rv = key_attr(read, rctx, CKA_CLASS, &cls, sizeof(cls));
     }
     if ((rv == CKR_OK) || (rv == CKR_ATTRIBUTE_TYPE_INVALID))
     {
-        rv = key_attr(s, h, sign ? CKA_SIGN : CKA_VERIFY, &allowed, sizeof(allowed));
+        rv = key_attr(read, rctx, sign ? CKA_SIGN : CKA_VERIFY, &allowed, sizeof(allowed));
     }
     /* Only an absent attribute is a policy verdict; a store failure is
      * reported as itself. */
@@ -99,14 +103,14 @@ static CK_RV check_key(
     }
     CK_MECHANISM_TYPE mechs[KEYGEN_MAX_ALLOWED_MECHS];
     CK_ATTRIBUTE list = { CKA_ALLOWED_MECHANISMS, mechs, sizeof(mechs) };
-    rv = g_tsra_pkcs11.store.ops->get_attr(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, h, &list, 1);
+    rv = read(rctx, &list);
     if (rv == CKR_ATTRIBUTE_TYPE_INVALID)
     {
         return CKR_OK; /* no list: every mechanism of the key type */
     }
     if ((rv != CKR_OK) && (rv != CKR_BUFFER_TOO_SMALL))
     {
-        return (rv == CKR_OBJECT_HANDLE_INVALID) ? CKR_KEY_HANDLE_INVALID : rv;
+        return rv;
     }
     return tsra_pkcs11_key_mech_permitted(rv, mechs, list.ulValueLen, sm->mech)
                ? CKR_OK
@@ -203,8 +207,17 @@ static CK_RV sign_init(
     CK_ULONG body_len = 0;
     CK_ULONG body_cap = 0; /* the read may report a larger body_len if the record changed */
     sign_op *op = NULL;
-    rv = g_tsra_pkcs11.store.ops
-             ->get_key_body(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, hKey, NULL, &body_len);
+    key_check_ctx kc = { sm, want == P11_OP_SIGN };
+    rv = g_tsra_pkcs11.store.ops->get_key_body(
+        g_tsra_pkcs11.store.ctx,
+        s->slot,
+        CK_TRUE,
+        hKey,
+        NULL,
+        &body_len,
+        NULL,
+        NULL
+    );
     if (rv == CKR_OBJECT_HANDLE_INVALID)
     {
         rv = CKR_KEY_HANDLE_INVALID; /* the handle names a key at this entry point */
@@ -214,10 +227,6 @@ static CK_RV sign_init(
         /* An object with no masked body (a data object, or a public key made
          * with C_CreateObject) backs no device key. */
         rv = CKR_KEY_HANDLE_INVALID;
-    }
-    if (rv == CKR_OK)
-    {
-        rv = check_key(s, hKey, sm, want == P11_OP_SIGN);
     }
     if (rv != CKR_OK)
     {
@@ -231,8 +240,21 @@ static CK_RV sign_init(
         rv = CKR_HOST_MEMORY;
         goto cleanup;
     }
-    rv = g_tsra_pkcs11.store.ops
-             ->get_key_body(g_tsra_pkcs11.store.ctx, s->slot, CK_TRUE, hKey, body, &body_len);
+    /* The key's policy is checked on the record the body comes from. */
+    rv = g_tsra_pkcs11.store.ops->get_key_body(
+        g_tsra_pkcs11.store.ctx,
+        s->slot,
+        CK_TRUE,
+        hKey,
+        body,
+        &body_len,
+        check_key,
+        &kc
+    );
+    if (rv == CKR_OBJECT_HANDLE_INVALID)
+    {
+        rv = CKR_KEY_HANDLE_INVALID; /* removed since the length was read */
+    }
     if (rv != CKR_OK)
     {
         goto cleanup;
