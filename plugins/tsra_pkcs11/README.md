@@ -79,12 +79,15 @@ the spec requires). Implemented so far:
   list (`{ CKM_AES_CBC }`) is kept and enforced. Generated keys are always
   sensitive, unextractable and local — a template asking otherwise is rejected
   (note: OpenSC `pkcs11-tool --keygen` needs its `--sensitive` flag for this
-  reason). A key is private (`CKA_PRIVATE` TRUE, visible only while logged in)
-  unless the template sets `CKA_PRIVATE` to FALSE.
+  reason). A key is private (`CKA_PRIVATE` TRUE, visible only while logged
+  in); only a session key may set `CKA_PRIVATE` FALSE, so `pkcs11-tool
+  --keygen` also needs `--private` (see Deviations).
 - **`C_Encrypt` / `C_Decrypt` one-shot (`CKM_AES_CBC`, `CKM_AES_CBC_PAD`,
   `CKM_AES_GCM`, `CKM_AES_XTS`)** — each `C_EncryptInit`/`C_DecryptInit`
-  unmasks the stored blob into a fresh device key that lives exactly as long
-  as the operation; a key serves only its own family. Input and
+  takes only a secret key, checks its class, type, usage and allowed
+  mechanisms in the same store read that returns its masked blob, and unmasks
+  the blob into a fresh device key that lives exactly as long as the
+  operation; a key serves only its own family. Input and
   output may be the same buffer; the binding stages the input whenever the two
   ranges overlap, because the native API cannot hold a read and a write slice
   over the same bytes.
@@ -161,7 +164,7 @@ the spec requires). Implemented so far:
 - **An AES-GCM key is a key kind of its own.** The device keeps CBC, GCM and
   XTS keys apart, so a key serves only its own family (table above). A GCM key
   is requested with `CKA_ALLOWED_MECHANISMS = { CKM_AES_GCM }` at generation;
-  with OpenSC: `pkcs11-tool --keygen --key-type aes:32 --sensitive
+  with OpenSC: `pkcs11-tool --keygen --key-type aes:32 --sensitive --private
   --allowed-mechanisms AES-GCM`. A key generated without that list is a CBC
   key, and `CKM_AES_GCM` on it returns `CKR_KEY_FUNCTION_NOT_PERMITTED`. In
   PKCS#11 an AES key without the attribute serves every AES mechanism.
@@ -190,12 +193,16 @@ the spec requires). Implemented so far:
 - **No per-operation login.** The token has no context-specific login
   (`CKU_CONTEXT_SPECIFIC`) that would enforce `CKA_ALWAYS_AUTHENTICATE`, so a
   private-key template with it TRUE returns `CKR_ATTRIBUTE_VALUE_INVALID`.
-- **Token private keys are always private.** The file store authenticates
-  only private records, and a key's limits (`CKA_SIGN`,
-  `CKA_ALLOWED_MECHANISMS`) are attributes in its record. So a token
-  private-key template with `CKA_PRIVATE` FALSE returns
-  `CKR_TEMPLATE_INCONSISTENT`, and a clear record holding a private key,
-  which only an edit of the store can make, is refused like a tampered one.
+- **Token private and secret keys are always private.** The file store
+  authenticates only private records, and a key's limits (`CKA_SIGN`,
+  `CKA_ENCRYPT`, `CKA_ALLOWED_MECHANISMS`) are attributes in its record. So a
+  token private-key or secret-key template with `CKA_PRIVATE` FALSE returns
+  `CKR_TEMPLATE_INCONSISTENT`, and a clear record holding a private or secret
+  key, which only an edit of the store can make, is refused like a tampered
+  one. A session key may be public. Ask for a private token key:
+  `pkcs11-tool --keygen --key-type aes:32 --sensitive --private`; without
+  `--private` the tool asks for a public token key and gets this error.
+  PKCS#11 lets any token object be public.
 - **Raw ECDSA takes 20, 32, 48 or 64 bytes.** The SDK infers the hash from
   the input length, so `CKM_ECDSA` input of any other length (SHA-224's 28
   bytes among them) returns `CKR_DATA_LEN_RANGE`. The module neither pads nor
@@ -278,11 +285,11 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
   device key generation per private write.
 - Reading a private object needs the login, whose device session unmasks the
   record's key and decrypts the record. A record whose tag does not match, or
-  a clear record that claims `CKA_PRIVATE` or holds a private key, is refused:
-  `CKR_FUNCTION_FAILED`. So is every search that meets it, with a debug line
-  naming the file, until the record is removed: the device reports a tag
-  mismatch and its own fault alike, so leaving the record out could hide an
-  object.
+  a clear record that claims `CKA_PRIVATE` or holds a private or secret key,
+  is refused: `CKR_FUNCTION_FAILED`. So is every search that meets it, with a
+  debug line naming the file, until the record is removed: the device reports
+  a tag mismatch and its own fault alike, so leaving the record out could hide
+  an object.
 - A record whose key the device does not unmask (the partition was
   provisioned afresh, as after a power cycle; on the simulator, a new server)
   is invisible
@@ -290,10 +297,14 @@ one (`CKA_PRIVATE` TRUE) with AES-GCM on the device:
   unmasks that key again, as for token keys. New private objects work
   meanwhile.
 - The record format is version 2. A version-1 record, from an earlier build,
-  is refused with a debug line; remove its slot directory.
+  is refused with a debug line; remove its slot directory. A public token
+  secret key from an earlier build is refused like a tampered record; destroy
+  it before updating, or remove its record file.
 
 Public objects are not authenticated. An EC public key's record holds the
-pair's masked blob, but the module only verifies with it.
+pair's masked blob, but the module only verifies with it. A sealed record's
+header holds its key's masked blob in clear, but the AES ciphers take only a
+secret key, so no clear record can lend them either blob.
 
 ## Layering
 
