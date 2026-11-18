@@ -55,6 +55,7 @@ use tsra_crypto::Verifier;
 use tsra_crypto::MLKEM_SHARED_SECRET_LEN;
 use tsra_fw_hsm_pal_traits::HsmError;
 use tsra_fw_hsm_pal_traits::HsmResult;
+use zeroize::Zeroizing;
 
 use crate::worker::WorkerPool;
 
@@ -87,7 +88,7 @@ impl StdPqc {
         variant: MlDsaVariant,
         seed: &[u8],
     ) -> HsmResult<(Vec<u8>, Vec<u8>)> {
-        let seed = seed.to_vec();
+        let seed = Zeroizing::new(seed.to_vec());
         self.pool
             .submit_with_result(async move {
                 let sk =
@@ -116,7 +117,7 @@ impl StdPqc {
         message: &[u8],
         ctx: &[u8],
     ) -> HsmResult<Vec<u8>> {
-        let (sk, message, ctx) = (sk.to_vec(), message.to_vec(), ctx.to_vec());
+        let (sk, message, ctx) = (Zeroizing::new(sk.to_vec()), message.to_vec(), ctx.to_vec());
         self.pool
             .submit_with_result(async move {
                 let sk = MlDsaPrivateKey::from_bytes(&sk).map_err(|_| HsmError::InvalidArg)?;
@@ -176,7 +177,7 @@ impl StdPqc {
         variant: MlKemVariant,
         seed: &[u8],
     ) -> HsmResult<(Vec<u8>, Vec<u8>)> {
-        let seed = seed.to_vec();
+        let seed = Zeroizing::new(seed.to_vec());
         self.pool
             .submit_with_result(async move {
                 let sk =
@@ -227,7 +228,7 @@ impl StdPqc {
         sk: &[u8],
         ct: &[u8],
     ) -> HsmResult<Vec<u8>> {
-        let (sk, ct) = (sk.to_vec(), ct.to_vec());
+        let (sk, ct) = (Zeroizing::new(sk.to_vec()), ct.to_vec());
         self.pool
             .submit_with_result(async move {
                 let sk = MlKemPrivateKey::from_bytes(&sk).map_err(|_| HsmError::InvalidArg)?;
