@@ -63,7 +63,8 @@ extern "C"
  *                                 or CKA_PUBLIC_EXPONENT
  *   CKR_CURVE_NOT_SUPPORTED       a CKA_EC_PARAMS naming a curve other than
  *                                 P-256, P-384 and P-521
- *   CKR_ATTRIBUTE_VALUE_INVALID   a CKA_EC_PARAMS that is no single DER
+ *   CKR_ATTRIBUTE_VALUE_INVALID   an empty CKA_MODULUS or CKA_PUBLIC_EXPONENT,
+ *                                 a CKA_EC_PARAMS that is no single DER
  *                                 element, or a CKA_EC_POINT that is not a
  *                                 point of that curve as the token stores one
  *                                 (tsra_pkcs11_ec_point_check)

@@ -4,12 +4,12 @@
 /// @file policy_tests.cpp
 ///
 /// The object policy through the module ABI: C_CreateObject needs a class,
-/// creates no secret or private key, and takes an EC or RSA public key only
-/// complete (curve and point, modulus and exponent), every template entry
-/// point holds a value
-/// to its type's width without reading past it, the count and byte ceilings,
-/// attribute arrays, attributes only the token sets, keys private by default,
-/// the read-only-session gates of C_CreateObject and C_DestroyObject,
+/// creates no secret or private key, and takes a public key only with its key
+/// type and an EC or RSA one only complete (curve and point, modulus and
+/// exponent), every template entry point holds a value to its type's width
+/// without reading past it, the count and byte ceilings, attribute arrays,
+/// attributes only the token sets, keys private by default, the
+/// read-only-session gates of C_CreateObject and C_DestroyObject,
 /// C_DestroyObject's CKA_DESTROYABLE gate, the file store's record limit, and
 /// the file store never sees refused key material. The verdict matrix is
 /// unit-tested in tests/attr_types_test.c and tests/attr_policy_test.c; here
@@ -66,6 +66,19 @@ std::vector<CK_ATTRIBUTE> rsa_public_key()
              { CKA_KEY_TYPE, &rsa, sizeof(rsa) },
              { CKA_MODULUS, n.data(), static_cast<CK_ULONG>(n.size()) },
              { CKA_PUBLIC_EXPONENT, e.data(), static_cast<CK_ULONG>(e.size()) } };
+}
+
+/// Expect C_CreateObject to refuse `tmpl` with `want` and hand out no object.
+void expect_refused(
+    CK_SESSION_HANDLE s,
+    CK_RV want,
+    std::vector<CK_ATTRIBUTE> tmpl,
+    const char *why
+)
+{
+    CK_OBJECT_HANDLE h = CK_INVALID_HANDLE;
+    EXPECT_CKR(want, create(s, std::move(tmpl), &h)) << why;
+    EXPECT_EQ(CK_INVALID_HANDLE, h) << why << ": a refused template hands out no object";
 }
 
 CK_ATTRIBUTE label_attr(const char *label)
@@ -159,44 +172,65 @@ TEST_F(object_policy, value_only_template_is_incomplete)
     );
 }
 
-TEST_F(object_policy, ec_and_rsa_public_keys_need_what_they_are_used_with)
+TEST_F(object_policy, incomplete_or_unsupported_ec_public_key_is_refused)
 {
-    // Positive controls first: a P-256 point from the host and a published
-    // RSA key, each complete, are stored.
     CK_KEY_TYPE ec = CKK_EC;
-    CK_KEY_TYPE rsa = CKK_RSA;
     std::vector<CK_BYTE> p256 = ec_curves()[0].params;
+    std::vector<CK_BYTE> secp256k1 = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a };
     host::Pkey key = host::ec_generate("P-256");
     std::vector<CK_BYTE> point = host::ec_point(key.get());
-    point.insert(point.begin(), { 0x04, static_cast<CK_BYTE>(point.size()) }); /* OCTET STRING */
-    std::vector<CK_BYTE> secp256k1 = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a };
-    std::vector<CK_BYTE> n = vectors::hex(vectors::kRsaOaepKey0.n);
-    std::vector<CK_BYTE> e = vectors::hex(vectors::kRsaOaepKey0.e);
+    point.insert(point.begin(), { kDerOctetString, static_cast<CK_BYTE>(point.size()) });
     CK_ATTRIBUTE cls = { CKA_CLASS, &g_public, sizeof(g_public) };
-    CK_ATTRIBUTE ec_type = { CKA_KEY_TYPE, &ec, sizeof(ec) };
-    CK_ATTRIBUTE rsa_type = { CKA_KEY_TYPE, &rsa, sizeof(rsa) };
+    CK_ATTRIBUTE type = { CKA_KEY_TYPE, &ec, sizeof(ec) };
     CK_ATTRIBUTE params = { CKA_EC_PARAMS, p256.data(), static_cast<CK_ULONG>(p256.size()) };
-    CK_ATTRIBUTE pt = { CKA_EC_POINT, point.data(), static_cast<CK_ULONG>(point.size()) };
-    CK_ATTRIBUTE modulus = { CKA_MODULUS, n.data(), static_cast<CK_ULONG>(n.size()) };
-    CK_ATTRIBUTE exponent = { CKA_PUBLIC_EXPONENT, e.data(), static_cast<CK_ULONG>(e.size()) };
-    CK_OBJECT_HANDLE h = CK_INVALID_HANDLE;
-    EXPECT_CKR_OK(create(s_, { cls, ec_type, params, pt }, &h)) << "a complete EC key";
-    EXPECT_CKR_OK(create(s_, { cls, rsa_type, modulus, exponent }, &h)) << "a complete RSA key";
-
-    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, ec_type, params }, &h)) << "no point";
-    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, ec_type, pt }, &h)) << "no curve";
     CK_ATTRIBUTE k1 = { CKA_EC_PARAMS, secp256k1.data(), static_cast<CK_ULONG>(secp256k1.size()) };
-    EXPECT_CKR(CKR_CURVE_NOT_SUPPORTED, create(s_, { cls, ec_type, k1, pt }, &h));
-    CK_ATTRIBUTE bare = { CKA_EC_POINT, point.data() + 2, static_cast<CK_ULONG>(point.size() - 2) };
-    EXPECT_CKR(CKR_ATTRIBUTE_VALUE_INVALID, create(s_, { cls, ec_type, params, bare }, &h))
-        << "a point without its OCTET STRING";
-    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, rsa_type, modulus }, &h))
-        << "no exponent";
-    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, rsa_type, exponent }, &h))
-        << "no modulus";
-    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, modulus, exponent }, &h))
-        << "no key type";
-    EXPECT_EQ(CK_INVALID_HANDLE, h) << "a refused template hands out no object";
+    CK_ATTRIBUTE pt = { CKA_EC_POINT, point.data(), static_cast<CK_ULONG>(point.size()) };
+    CK_ATTRIBUTE bare = { CKA_EC_POINT,
+                          point.data() + kDerHeaderShort,
+                          static_cast<CK_ULONG>(point.size() - kDerHeaderShort) };
+    CK_OBJECT_HANDLE h = CK_INVALID_HANDLE;
+    ASSERT_CKR_OK(create(s_, { cls, type, params, pt }, &h)) << "a complete P-256 key is stored";
+
+    expect_refused(s_, CKR_TEMPLATE_INCOMPLETE, { cls, type, params }, "an EC key needs its point");
+    expect_refused(s_, CKR_TEMPLATE_INCOMPLETE, { cls, type, pt }, "an EC key needs its curve");
+    expect_refused(
+        s_,
+        CKR_CURVE_NOT_SUPPORTED,
+        { cls, type, k1, pt },
+        "the token supports P-256, P-384 and P-521 only"
+    );
+    expect_refused(
+        s_,
+        CKR_ATTRIBUTE_VALUE_INVALID,
+        { cls, type, params, bare },
+        "CKA_EC_POINT is a DER OCTET STRING"
+    );
+}
+
+TEST_F(object_policy, incomplete_rsa_public_key_is_template_incomplete)
+{
+    std::vector<CK_ATTRIBUTE> key = rsa_public_key(); // class, type, modulus, exponent
+    CK_OBJECT_HANDLE h = CK_INVALID_HANDLE;
+    ASSERT_CKR_OK(create(s_, key, &h)) << "a complete RSA key is stored";
+
+    expect_refused(
+        s_,
+        CKR_TEMPLATE_INCOMPLETE,
+        { key[0], key[1], key[2] },
+        "an RSA key needs its exponent"
+    );
+    expect_refused(
+        s_,
+        CKR_TEMPLATE_INCOMPLETE,
+        { key[0], key[1], key[3] },
+        "an RSA key needs its modulus"
+    );
+    expect_refused(
+        s_,
+        CKR_TEMPLATE_INCOMPLETE,
+        { key[0], key[2], key[3] },
+        "a public key needs its key type"
+    );
 }
 
 TEST_F(object_policy, unsupported_class_is_value_invalid)

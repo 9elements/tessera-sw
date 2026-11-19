@@ -143,6 +143,13 @@ CK_ULONG tsra_pkcs11_ec_coord_len(tsra_pkcs11_ec_curve_t curve)
     return (c != NULL) ? c->coord_len : 0;
 }
 
+/* The length of an uncompressed point on `c`: EC_POINT_UNCOMPRESSED, then both
+ * coordinates. */
+static CK_ULONG uncompressed_len(const curve_info *c)
+{
+    return 1 + (2 * c->coord_len);
+}
+
 CK_RV tsra_pkcs11_ec_point_check(const void *value, CK_ULONG len, tsra_pkcs11_ec_curve_t curve)
 {
     const curve_info *c = find_curve(curve);
@@ -156,7 +163,7 @@ CK_RV tsra_pkcs11_ec_point_check(const void *value, CK_ULONG len, tsra_pkcs11_ec
     const CK_BYTE *point = NULL;
     CK_ULONG point_len = 0;
     if (!der_next(&p, end, &tag, &point, &point_len) || (tag != DER_OCTET_STRING) || (p != end) ||
-        (point_len != (1 + (2 * c->coord_len))) || (point[0] != EC_POINT_UNCOMPRESSED))
+        (point_len != uncompressed_len(c)) || (point[0] != EC_POINT_UNCOMPRESSED))
     {
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
@@ -199,7 +206,7 @@ CK_RV tsra_pkcs11_ec_point_from_spki(
     {
         return CKR_DEVICE_ERROR;
     }
-    CK_ULONG point_len = 1 + (2 * c->coord_len);
+    CK_ULONG point_len = uncompressed_len(c);
     if (!der_next(&p, end, &tag, &bits, &bits_len) || (tag != DER_BIT_STRING) || (p != end) ||
         (bits_len != (1 + point_len)) || (bits[0] != 0) || (bits[1] != EC_POINT_UNCOMPRESSED))
     {
