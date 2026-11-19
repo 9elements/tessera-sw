@@ -365,14 +365,16 @@ TEST_F(persist, a_record_key_in_a_clear_record_encrypts_nothing)
 
     const std::string label = "lent-record-key";
     CK_BBOOL yes = CK_TRUE;
+    CK_BBOOL no = CK_FALSE;
     CK_KEY_TYPE aes = CKK_AES;
     CK_MECHANISM_TYPE gcm_only = CKM_AES_GCM;
+    // Each record says CKA_PRIVATE FALSE outright; one row leaves it out.
     auto forge = [&](CK_OBJECT_CLASS cls, CK_ATTRIBUTE_TYPE omit) {
         std::vector<std::pair<CK_ATTRIBUTE_TYPE, std::vector<CK_BYTE>>> attrs = {
             { CKA_CLASS, raw(cls) },     { CKA_TOKEN, raw(yes) },
             { CKA_KEY_TYPE, raw(aes) },  { CKA_ALLOWED_MECHANISMS, raw(gcm_only) },
             { CKA_ENCRYPT, raw(yes) },   { CKA_DECRYPT, raw(yes) },
-            { CKA_LABEL, bytes(label) },
+            { CKA_LABEL, bytes(label) }, { CKA_PRIVATE, raw(no) },
         };
         std::erase_if(attrs, [omit](const auto &a) { return a.first == omit; });
         return clear_record(attrs, record_key);
@@ -387,6 +389,7 @@ TEST_F(persist, a_record_key_in_a_clear_record_encrypts_nothing)
     const Row rows[] = {
         { CKO_DATA, CKA_VENDOR_DEFINED, CKR_KEY_FUNCTION_NOT_PERMITTED, "only a secret key" },
         { CKO_PUBLIC_KEY, CKA_VENDOR_DEFINED, CKR_KEY_FUNCTION_NOT_PERMITTED, "only a secret key" },
+        { CKO_DATA, CKA_PRIVATE, CKR_KEY_FUNCTION_NOT_PERMITTED, "no CKA_PRIVATE changes nothing" },
         { CKO_DATA, CKA_CLASS, CKR_KEY_FUNCTION_NOT_PERMITTED, "no class is no secret key" },
         { CKO_DATA, CKA_KEY_TYPE, CKR_KEY_TYPE_INCONSISTENT, "no key type is no AES key" },
     };
@@ -403,11 +406,16 @@ TEST_F(persist, a_record_key_in_a_clear_record_encrypts_nothing)
         EXPECT_CKR(row.want, p11()->C_DecryptInit(s_, &gcm, lent)) << row.rule << " decrypts";
         abandon_operations(s_);
     }
-    // The same record as a secret key: the store never writes a clear one.
-    write_file(forged, forge(CKO_SECRET_KEY, CKA_VENDOR_DEFINED));
-    EXPECT_CKR(CKR_FUNCTION_FAILED, p11()->C_EncryptInit(s_, &gcm, lent))
-        << "a clear secret key is refused like a tampered record";
-    abandon_operations(s_);
+    // The same record as a secret key: the store never writes a clear one. With
+    // CKA_PRIVATE FALSE it is what an earlier build wrote for a public token key.
+    for (CK_ATTRIBUTE_TYPE omit : { CKA_VENDOR_DEFINED, CKA_PRIVATE })
+    {
+        write_file(forged, forge(CKO_SECRET_KEY, omit));
+        EXPECT_CKR(CKR_FUNCTION_FAILED, p11()->C_EncryptInit(s_, &gcm, lent))
+            << "a clear secret key is refused like a tampered record, CKA_PRIVATE "
+            << (omit == CKA_PRIVATE ? "left out" : "FALSE");
+        abandon_operations(s_);
+    }
     std::filesystem::remove(forged);
 }
 

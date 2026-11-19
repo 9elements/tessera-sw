@@ -248,6 +248,11 @@ TEST_F(aes_keygen, a_token_key_must_be_private)
     CK_ULONG n = 0;
     ASSERT_NO_FATAL_FAILURE(count_labelled(&n));
     ASSERT_EQ(1u, n) << "the search finds the session key";
+    CK_BYTE iv[kAesBlock] = { 0 };
+    CK_MECHANISM cbc = { CKM_AES_CBC, iv, sizeof(iv) };
+    std::vector<CK_BYTE> ct;
+    EXPECT_CKR_OK(crypt_oneshot(s_, true, &cbc, key, pattern(kAesBlock), ct))
+        << "a public session key encrypts";
     ASSERT_CKR_OK(p11()->C_DestroyObject(s_, key));
 
     key = CK_INVALID_HANDLE;
