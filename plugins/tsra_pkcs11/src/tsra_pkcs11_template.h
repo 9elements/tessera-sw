@@ -121,16 +121,19 @@ void tsra_pkcs11_tmpl_append(
  *                                 or naming any mechanism outside the family
  *                                 `mech` produces), CKA_SENSITIVE=FALSE,
  *                                 CKA_EXTRACTABLE=TRUE (device keys only ever
- *                                 exist masked), or key material (generated
- *                                 keys take none)
+ *                                 exist masked), key material (generated
+ *                                 keys take none), or CKA_TOKEN=TRUE with
+ *                                 CKA_PRIVATE=FALSE (the file store seals only
+ *                                 private records)
  *   CKR_ATTRIBUTE_READ_ONLY       an attribute only the token sets
  *                                 (tsra_pkcs11_attr_is_token_set)
  *   CKR_TEMPLATE_INCOMPLETE       no CKA_VALUE_LEN
  *   CKR_OK                        otherwise; unknown types are accepted and
  *                                 later stored verbatim
  * Attribute shapes are checked in template order and the first failure wins;
- * the checks that depend on the family (it can be named by an attribute later
- * in the template) run after that pass.
+ * the checks that combine attributes (CKA_TOKEN with CKA_PRIVATE, and the
+ * family, which an attribute later in the template can name) run after that
+ * pass.
  */
 CK_RV tsra_pkcs11_keygen_check_template(
     CK_MECHANISM_TYPE mech,

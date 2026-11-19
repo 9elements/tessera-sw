@@ -1085,6 +1085,16 @@ int main(void)
                 CKR_FUNCTION_FAILED,
         "seal: a clear record holding a private key is refused"
     );
+    /* Likewise a secret key: its record limits what its key body may encrypt. */
+    kcls = CKO_SECRET_KEY;
+    fl = sizeof(fbuf);
+    snprintf(path, sizeof(path), "%s/903.object", seal_dir);
+    CHECK(
+        tsra_pkcs11_record_encode(&clear_key, NULL, fbuf, &fl) == CKR_OK && spill(path, fbuf, fl) &&
+            read_label(&s, SEAL_SLOT, CK_TRUE, TOKEN_FLAG | 903, lbuf, sizeof(lbuf), &llen) ==
+                CKR_FUNCTION_FAILED,
+        "seal: a clear record holding a secret key is refused"
+    );
     forged_attrs[2].value = &ck_false;
     fl = sizeof(fbuf);
     snprintf(path, sizeof(path), "%s/901.object", seal_dir);

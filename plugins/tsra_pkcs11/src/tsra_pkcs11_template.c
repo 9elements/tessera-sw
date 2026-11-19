@@ -228,6 +228,7 @@ CK_RV tsra_pkcs11_keygen_check_template(
     CK_BBOOL have_value_len = CK_FALSE;
     CK_BBOOL have_key_type = CK_FALSE;
     CK_KEY_TYPE key_type = 0;
+    CK_BBOOL priv = CK_TRUE; /* a generated key is private unless the template says otherwise */
     const CK_ATTRIBUTE *allowed = NULL;
 
     CK_RV rv = tsra_pkcs11_tmpl_check_bounds(tmpl, count);
@@ -352,11 +353,24 @@ CK_RV tsra_pkcs11_keygen_check_template(
                 return rv;
             }
             break;
+        case CKA_PRIVATE:
+            rv = tsra_pkcs11_tmpl_bool(a, &priv);
+            if (rv != CKR_OK)
+            {
+                return rv;
+            }
+            break;
         default:
             break; /* stored verbatim on the object */
         }
     }
 
+    /* Only a sealed record guards the attributes that limit a token key and
+     * its masked blob, and the file store seals only private records. */
+    if (*token && !priv)
+    {
+        return CKR_TEMPLATE_INCONSISTENT;
+    }
     const tsra_pkcs11_keygen_policy *p = NULL;
     rv = resolve_policy(mech, allowed, &p);
     if (rv != CKR_OK)

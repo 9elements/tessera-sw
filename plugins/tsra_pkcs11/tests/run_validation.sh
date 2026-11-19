@@ -110,9 +110,10 @@ if [ -f "$HSMMOD" ]; then
     # ceremony's best-effort diagnostic above), so announce a failure before the
     # pipefail/errexit abort rather than aborting the script silently.
     echo; echo "== emulator-backed: AES keygen via pkcs11-tool =="
-    # --sensitive is required: this token refuses non-sensitive HSM keys.
+    # --sensitive and --private are required: this token refuses
+    # non-sensitive HSM keys and public token keys.
     if ! pkcs11-tool --module "$HSMMOD" --login --pin 1234 --keygen \
-        --key-type aes:32 --label validation --sensitive 2>&1 | sed 's/^/   /'; then
+        --key-type aes:32 --label validation --sensitive --private 2>&1 | sed 's/^/   /'; then
         echo "   (AES keygen failed)"; exit 1
     fi
 

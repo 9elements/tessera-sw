@@ -71,9 +71,10 @@ jobs:
       - name: AES keygen via pkcs11-tool
         run: |
           set -euo pipefail
-          # --sensitive is required: the module refuses non-sensitive HSM keys.
+          # --sensitive and --private are required: the module refuses
+          # non-sensitive HSM keys and public token keys.
           pkcs11-tool --module "$TSRA_PKCS11_MODULE" --login --pin 1234 --keygen \
-            --key-type aes:32 --label ci-aes --sensitive
+            --key-type aes:32 --label ci-aes --sensitive --private
 
       # A private EC key signs or derives, never both, so the tool's default
       # (both) is refused and a named usage works.
