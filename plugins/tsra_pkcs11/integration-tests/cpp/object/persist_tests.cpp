@@ -128,6 +128,17 @@ void put_le(std::vector<CK_BYTE> &out, uint64_t v, size_t n)
     }
 }
 
+/// The `n` bytes of `in` at `at` as a little-endian value, as put_le writes it.
+uint64_t get_le(const std::vector<CK_BYTE> &in, size_t at, size_t n)
+{
+    uint64_t v = 0;
+    for (size_t i = 0; i < n; i++)
+    {
+        v |= static_cast<uint64_t>(in[at + i]) << (i * CHAR_BIT);
+    }
+    return v;
+}
+
 /// The bytes of a fixed-size attribute value, as the module stores them.
 template <typename T> std::vector<CK_BYTE> raw(const T &v)
 {
@@ -344,11 +355,7 @@ TEST_F(persist, a_record_key_in_a_clear_record_encrypts_nothing)
     std::vector<CK_BYTE> data;
     ASSERT_NO_FATAL_FAILURE(only_record(dir_, &sealed, &data));
     ASSERT_GT(data.size(), kRecordKeyAt);
-    size_t key_len = 0;
-    for (size_t i = 0; i < sizeof(uint32_t); i++)
-    {
-        key_len |= static_cast<size_t>(data[kRecordHeaderLen + i]) << (i * CHAR_BIT);
-    }
+    const size_t key_len = get_le(data, kRecordHeaderLen, sizeof(uint32_t));
     ASSERT_GT(key_len, 0u);
     ASSERT_GE(data.size(), kRecordKeyAt + key_len);
     std::vector<CK_BYTE> record_key(
