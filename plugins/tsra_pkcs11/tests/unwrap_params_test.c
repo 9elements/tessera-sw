@@ -389,10 +389,6 @@ static void test_unwrapping_key(void)
         "NULL reader -> CKR_ARGUMENTS_BAD"
     );
     CHECK(
-        key_check(good, 3, CKR_OBJECT_HANDLE_INVALID) == CKR_UNWRAPPING_KEY_HANDLE_INVALID,
-        "no such object -> CKR_UNWRAPPING_KEY_HANDLE_INVALID"
-    );
-    CHECK(
         key_check(good, 3, CKR_DEVICE_ERROR) == CKR_DEVICE_ERROR,
         "a store failure is passed through"
     );

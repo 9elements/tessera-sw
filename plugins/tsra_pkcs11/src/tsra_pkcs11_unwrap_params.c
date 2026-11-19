@@ -211,10 +211,6 @@ CK_RV tsra_pkcs11_unwrapping_key_check(tsra_pkcs11_attr_reader read, void *ctx)
     }
     CK_OBJECT_CLASS cls = 0;
     CK_RV rv = read_exact(read, ctx, CKA_CLASS, &cls, sizeof(cls));
-    if (rv == CKR_OBJECT_HANDLE_INVALID)
-    {
-        return CKR_UNWRAPPING_KEY_HANDLE_INVALID;
-    }
     CK_KEY_TYPE kt = 0;
     if (rv == CKR_OK)
     {

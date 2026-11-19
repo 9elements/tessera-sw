@@ -23,17 +23,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The object a policy check reads; the caller holds the login. */
+/* What C_UnwrapKey reads of the unwrapping key object. */
 typedef struct
 {
-    CK_SLOT_ID slot;
-    CK_OBJECT_HANDLE h;
-} object_ref;
+    CK_BYTE modulus[RSA_UNWRAP_MODULUS_BYTES];
+    CK_ULONG modulus_len; /* 0 when the object carries none that fits */
+} unwrapping_key;
 
-static CK_RV read_object(void *ctx, CK_ATTRIBUTE *a)
+/*
+ * The object's policy (tsra_pkcs11_unwrapping_key_check), then its modulus
+ * into the `unwrapping_key` at `cctx`. The store runs it on the record it has
+ * loaded, so a record rewritten in between cannot pass the policy with one
+ * version and name the device key with another.
+ */
+static CK_RV unwrapping_key_read(void *cctx, tsra_pkcs11_objstore_reader read, void *rctx)
 {
-    const object_ref *o = (const object_ref *)ctx;
-    return g_tsra_pkcs11.store.ops->get_attr(g_tsra_pkcs11.store.ctx, o->slot, CK_TRUE, o->h, a, 1);
+    unwrapping_key *k = (unwrapping_key *)cctx;
+    CK_RV rv = tsra_pkcs11_unwrapping_key_check(read, rctx);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    CK_ATTRIBUTE a = { CKA_MODULUS, k->modulus, sizeof(k->modulus) };
+    k->modulus_len = (read(rctx, &a) == CKR_OK) ? a.ulValueLen : 0;
+    return CKR_OK;
 }
 
 CK_RV tsra_pkcs11_unwrapping_pair_generate(
@@ -155,7 +168,11 @@ cleanup:
  * fresh unwrapping key, so a token object from another process names a key
  * that is gone.
  */
-static CK_RV unwrapping_key_handle(const tsra_pkcs11_slot_t *slot, object_ref *obj, uint32_t *out)
+static CK_RV unwrapping_key_handle(
+    const tsra_pkcs11_slot_t *slot,
+    const unwrapping_key *obj,
+    uint32_t *out
+)
 {
     CK_BYTE *spki = NULL;
     CK_ULONG spki_len = 0;
@@ -166,15 +183,12 @@ static CK_RV unwrapping_key_handle(const tsra_pkcs11_slot_t *slot, object_ref *o
         return rv;
     }
     tsra_pkcs11_rsa_public key;
-    CK_BYTE modulus[RSA_UNWRAP_MODULUS_BYTES];
-    CK_ATTRIBUTE a = { CKA_MODULUS, modulus, sizeof(modulus) };
-    if (!tsra_pkcs11_spki_rsa(spki, spki_len, &key) || (key.n_len != sizeof(modulus)))
+    if (!tsra_pkcs11_spki_rsa(spki, spki_len, &key) || (key.n_len != RSA_UNWRAP_MODULUS_BYTES))
     {
         TSRA_PKCS11_LOG("unwrapping key: not an RSA-%u public key", RSA_UNWRAP_KEY_BITS);
         rv = CKR_DEVICE_ERROR;
     }
-    else if ((read_object(obj, &a) != CKR_OK) || (a.ulValueLen != sizeof(modulus)) ||
-             (memcmp(modulus, key.n, sizeof(modulus)) != 0))
+    else if ((obj->modulus_len != key.n_len) || (memcmp(obj->modulus, key.n, key.n_len) != 0))
     {
         TSRA_PKCS11_LOG("unwrapping key: the object names another partition's key");
         rv = CKR_UNWRAPPING_KEY_HANDLE_INVALID;
@@ -225,10 +239,27 @@ CK_RV C_UnwrapKey(
     {
         rv = CKR_USER_NOT_LOGGED_IN; /* unwrapping needs the device session */
     }
-    object_ref obj = { s->slot, hUnwrappingKey };
+    unwrapping_key obj = { { 0 }, 0 };
     if (rv == CKR_OK)
     {
-        rv = tsra_pkcs11_unwrapping_key_check(read_object, &obj);
+        /* The policy and the modulus come from one read of the object
+         * (unwrapping_key_read). It carries no masked blob, so the sizing call
+         * is the whole read. */
+        CK_ULONG body_len = 0;
+        rv = g_tsra_pkcs11.store.ops->get_key_body(
+            g_tsra_pkcs11.store.ctx,
+            s->slot,
+            CK_TRUE,
+            hUnwrappingKey,
+            NULL,
+            &body_len,
+            unwrapping_key_read,
+            &obj
+        );
+        if (rv == CKR_OBJECT_HANDLE_INVALID)
+        {
+            rv = CKR_UNWRAPPING_KEY_HANDLE_INVALID; /* the handle names the unwrapping key here */
+        }
     }
     /* Holds the template that is stored, so it must stay put until then. */
     tsra_pkcs11_unwrap_target target;

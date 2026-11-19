@@ -108,9 +108,9 @@ CK_RV tsra_pkcs11_unwrap_check_template(
 );
 
 /*
- * Whether the object `read` sees may unwrap with CKM_RSA_AES_KEY_WRAP. Returns:
+ * Whether the object `read` sees may unwrap with CKM_RSA_AES_KEY_WRAP. The
+ * caller maps a missing object to CKR_UNWRAPPING_KEY_HANDLE_INVALID. Returns:
  *   CKR_ARGUMENTS_BAD                      NULL `read`
- *   CKR_UNWRAPPING_KEY_HANDLE_INVALID      `read` finds no such object
  *   CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT   not an RSA private key
  *   CKR_KEY_FUNCTION_NOT_PERMITTED         CKA_UNWRAP absent or FALSE
  *   any other failure of `read`, passed through
