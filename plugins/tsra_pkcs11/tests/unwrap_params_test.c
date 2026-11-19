@@ -15,8 +15,9 @@
  * unwrap template with its blob length rule for each key family (the XTS
  * container included), the unwrapping-key rule against a fake object, the
  * exact key pair template and its refusals, the templates stored for both
- * halves, and the SubjectPublicKeyInfo walk on a real RSA-1024 key, on
- * broken encodings and on DER lengths around the short and long forms.
+ * halves, the SubjectPublicKeyInfo walk on a real RSA-1024 key, on broken
+ * encodings and on DER lengths around the short and long forms, and the
+ * comparison of an object's modulus with the device key.
  */
 
 #include "tsra_pkcs11_unwrap_params.h"
@@ -872,6 +873,38 @@ static void test_der_lengths(void)
     }
 }
 
+static void test_match(void)
+{
+    printf("== unwrapping_key_match ==\n");
+    CK_BYTE spki[SPKI_MAX];
+    size_t len = rsa_spki(spki, RSA_UNWRAP_MODULUS_BYTES, min_len_bytes(RSA_UNWRAP_MODULUS_BYTES));
+    CK_BYTE n[RSA_UNWRAP_MODULUS_BYTES];
+    memset(n, N_BYTE, sizeof(n));
+    CHECK(
+        tsra_pkcs11_unwrapping_key_match(spki, len, n, sizeof(n)) == CKR_OK,
+        "the device key's own modulus -> CKR_OK"
+    );
+    n[sizeof(n) - 1] ^= 1;
+    CHECK(
+        tsra_pkcs11_unwrapping_key_match(spki, len, n, sizeof(n)) ==
+            CKR_UNWRAPPING_KEY_HANDLE_INVALID,
+        "another modulus -> CKR_UNWRAPPING_KEY_HANDLE_INVALID"
+    );
+    n[sizeof(n) - 1] ^= 1;
+    CHECK(
+        (tsra_pkcs11_unwrapping_key_match(spki, len, n, sizeof(n) - 1) ==
+         CKR_UNWRAPPING_KEY_HANDLE_INVALID) &&
+            (tsra_pkcs11_unwrapping_key_match(spki, len, NULL, 0) ==
+             CKR_UNWRAPPING_KEY_HANDLE_INVALID),
+        "a shorter modulus or none -> CKR_UNWRAPPING_KEY_HANDLE_INVALID"
+    );
+    CHECK(
+        tsra_pkcs11_unwrapping_key_match(SPKI, sizeof(SPKI), SPKI + SPKI_N_OFFSET, SPKI_N_LEN) ==
+            CKR_DEVICE_ERROR,
+        "a device key of another size -> CKR_DEVICE_ERROR, even with its own modulus"
+    );
+}
+
 int main(void)
 {
     test_params();
@@ -880,6 +913,7 @@ int main(void)
     test_pair_check();
     test_build();
     test_der_lengths();
+    test_match();
     printf(
         g_fail ? "\nunwrap_params_test: FAILED (%d checks)\n"
                : "\nunwrap_params_test: all %d checks passed\n",

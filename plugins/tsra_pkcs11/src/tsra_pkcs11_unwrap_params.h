@@ -177,6 +177,22 @@ typedef struct
 bool tsra_pkcs11_spki_rsa(const CK_BYTE *der, CK_ULONG len, tsra_pkcs11_rsa_public *out);
 
 /*
+ * Whether the device's unwrapping key, as the DER SubjectPublicKeyInfo `spki`
+ * the device reports for it, is the key an unwrapping key object names by its
+ * CKA_MODULUS (`modulus`, `modulus_len` bytes). Returns:
+ *   CKR_DEVICE_ERROR                    `spki` is not an RSA public key of
+ *                                       RSA_UNWRAP_KEY_BITS
+ *   CKR_UNWRAPPING_KEY_HANDLE_INVALID   another modulus, or none
+ *   CKR_OK                              otherwise
+ */
+CK_RV tsra_pkcs11_unwrapping_key_match(
+    const CK_BYTE *spki,
+    CK_ULONG spki_len,
+    const CK_BYTE *modulus,
+    CK_ULONG modulus_len
+);
+
+/*
  * Attributes tsra_pkcs11_unwrapping_half_build appends at most: class, key
  * type, CKA_PRIVATE, CKA_ID, modulus, public exponent, four usage defaults,
  * CKA_ALLOWED_MECHANISMS, CKA_LOCAL and CKA_KEY_GEN_MECHANISM, and for the

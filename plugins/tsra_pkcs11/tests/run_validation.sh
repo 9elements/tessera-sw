@@ -156,7 +156,10 @@ if [ -f "$HSMMOD" ]; then
     for dep in googletest wycheproof; do
         if [ ! -d "$deps/$dep-src" ] && [ -d "$WORK/cpp-tests/_deps/$dep-src" ]; then
             mkdir -p "$deps"
-            cp -r "$WORK/cpp-tests/_deps/$dep-src" "$deps/$dep-src" || true
+            cp -r "$WORK/cpp-tests/_deps/$dep-src" "$deps/$dep-src" || {
+                echo "   (could not cache $dep; the next run fetches it again)"
+                rm -rf "$deps/$dep-src"
+            }
         fi
     done
     cmake --build "$WORK/cpp-tests" --parallel > "$WORK/cmake-build.log" 2>&1 \

@@ -81,6 +81,7 @@ CK_RV tsra_pkcs11_unwrap_params_check(const CK_MECHANISM *mech, tsra_pkcs11_rsa_
     /* Neither block carries an alignment guarantee, so both are copied out. */
     CK_RSA_AES_KEY_WRAP_PARAMS p;
     memcpy(&p, mech->pParameter, sizeof(p));
+    /* No default for 0: PKCS#11, SoftHSM and the SDK take only 128, 192 and 256. */
     if (((p.ulAESKeyBits != (AES128_KEY_BYTES * CHAR_BIT)) &&
          (p.ulAESKeyBits != (AES192_KEY_BYTES * CHAR_BIT)) &&
          (p.ulAESKeyBits != (AES256_KEY_BYTES * CHAR_BIT))) ||
@@ -519,6 +520,25 @@ bool tsra_pkcs11_spki_rsa(const CK_BYTE *der, CK_ULONG len, tsra_pkcs11_rsa_publ
     }
     *out = k;
     return true;
+}
+
+CK_RV tsra_pkcs11_unwrapping_key_match(
+    const CK_BYTE *spki,
+    CK_ULONG spki_len,
+    const CK_BYTE *modulus,
+    CK_ULONG modulus_len
+)
+{
+    tsra_pkcs11_rsa_public key;
+    if (!tsra_pkcs11_spki_rsa(spki, spki_len, &key) || (key.n_len != RSA_UNWRAP_MODULUS_BYTES))
+    {
+        return CKR_DEVICE_ERROR;
+    }
+    if ((modulus == NULL) || (modulus_len != key.n_len) || (memcmp(modulus, key.n, key.n_len) != 0))
+    {
+        return CKR_UNWRAPPING_KEY_HANDLE_INVALID;
+    }
+    return CKR_OK;
 }
 
 CK_RV tsra_pkcs11_unwrapping_half_build(

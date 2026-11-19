@@ -5,8 +5,8 @@
  * The mechanism table (see tsra_pkcs11_mech.h). The device has no general RSA
  * key generation (CKM_RSA_PKCS_KEY_PAIR_GEN hands out its one unwrapping key
  * pair), no AES-ECB or CTR, no non-NIST curves and no SHA-3; the other
- * mechanisms it does have join the table with the piece that implements their
- * entry points.
+ * mechanisms it does have join the table when their entry points are
+ * implemented.
  */
 
 #include "tsra_pkcs11_mech.h"

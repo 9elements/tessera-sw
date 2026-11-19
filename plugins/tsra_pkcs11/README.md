@@ -149,8 +149,12 @@ the spec requires). Implemented so far:
   the device has (see Deviations). The template must ask for exactly that
   key: `CKA_MODULUS_BITS` 2048 and `CKA_WRAP` TRUE in the public template,
   `CKA_UNWRAP` TRUE in the private one, no other usage TRUE, and, if given,
-  the exponent 65537. Anything else returns `CKR_TEMPLATE_INCONSISTENT` (no
-  `CKA_MODULUS_BITS`: `CKR_TEMPLATE_INCOMPLETE`). Both objects carry the
+  the exponent 65537. Anything else that asks for another key returns
+  `CKR_TEMPLATE_INCONSISTENT` (no `CKA_MODULUS_BITS`:
+  `CKR_TEMPLATE_INCOMPLETE`). As in other templates, a value of the wrong size
+  or `CKA_ALWAYS_AUTHENTICATE` TRUE returns `CKR_ATTRIBUTE_VALUE_INVALID` (see
+  Deviations), an attribute only the token sets `CKR_ATTRIBUTE_READ_ONLY`, and
+  an attribute array `CKR_ATTRIBUTE_TYPE_INVALID`. Both objects carry the
   modulus, the exponent, `CKA_ID` (the SHA-1 of the modulus) and
   `CKA_ALLOWED_MECHANISMS = { CKM_RSA_AES_KEY_WRAP }`; the private one is
   sensitive and unextractable, and private on the token (see Deviations).

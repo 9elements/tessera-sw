@@ -299,34 +299,32 @@ TEST_F(unwrap, unwrapping_key_rules)
     host::Bytes blob = blob_of(host::Bytes(16, 0x16));
     RsaAesMechanism m;
     CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
-    EXPECT_CKR(
-        CKR_UNWRAPPING_KEY_HANDLE_INVALID,
-        unwrap_key(s_, kInvalidObject, &m.mech, blob, CKM_AES_CBC, &obj)
-    );
-    EXPECT_CKR(
-        CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT,
-        unwrap_key(s_, pub_, &m.mech, blob, CKM_AES_CBC, &obj)
-    );
+    ASSERT_CKR_OK(unwrap_key(s_, priv_, &m.mech, blob, CKM_AES_CBC, &obj))
+        << "the pair's private key unwraps";
+    // A refused unwrap leaves no object behind.
+    auto refused = [&](CK_RV want, CK_OBJECT_HANDLE unwrapping, const char *rule) {
+        CK_OBJECT_HANDLE none = CK_INVALID_HANDLE;
+        EXPECT_CKR(want, unwrap_key(s_, unwrapping, &m.mech, blob, CKM_AES_CBC, &none)) << rule;
+        EXPECT_EQ(CK_INVALID_HANDLE, none) << rule;
+    };
+    refused(CKR_UNWRAPPING_KEY_HANDLE_INVALID, kInvalidObject, "the handle must name an object");
+    refused(CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT, pub_, "a public key does not unwrap");
     CK_OBJECT_HANDLE aes = CK_INVALID_HANDLE;
     ASSERT_CKR_OK(gen_aes_key(s_, 32, CK_TRUE, CK_TRUE, "not-an-unwrapping-key", &aes));
-    EXPECT_CKR(
-        CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT,
-        unwrap_key(s_, aes, &m.mech, blob, CKM_AES_CBC, &obj)
-    );
+    refused(CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT, aes, "only an RSA private key unwraps");
 
     CK_BBOOL no = CK_FALSE;
     CK_ATTRIBUTE off = { CKA_UNWRAP, &no, sizeof(no) };
     ASSERT_CKR_OK(p11()->C_SetAttributeValue(s_, priv_, &off, 1));
-    EXPECT_CKR(
-        CKR_KEY_FUNCTION_NOT_PERMITTED,
-        unwrap_key(s_, priv_, &m.mech, blob, CKM_AES_CBC, &obj)
-    );
+    refused(CKR_KEY_FUNCTION_NOT_PERMITTED, priv_, "CKA_UNWRAP FALSE forbids the unwrap");
 
     CK_OBJECT_HANDLE pub = CK_INVALID_HANDLE;
     CK_OBJECT_HANDLE priv = CK_INVALID_HANDLE;
     ASSERT_CKR_OK(gen_unwrapping_pair(s_, &pub, &priv));
+    ASSERT_CKR_OK(unwrap_key(s_, priv, &m.mech, blob, CKM_AES_CBC, &obj))
+        << "a fresh pair unwraps while logged in";
     ASSERT_CKR_OK(p11()->C_Logout(s_));
-    EXPECT_CKR(CKR_USER_NOT_LOGGED_IN, unwrap_key(s_, priv, &m.mech, blob, CKM_AES_CBC, &obj));
+    refused(CKR_USER_NOT_LOGGED_IN, priv, "unwrapping needs the login");
 }
 
 TEST_F(unwrap, a_bad_blob_is_one_error_and_no_object)

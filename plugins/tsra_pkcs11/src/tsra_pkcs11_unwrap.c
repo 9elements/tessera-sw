@@ -21,7 +21,6 @@
 
 #include <limits.h>
 #include <stdlib.h>
-#include <string.h>
 
 /* What C_UnwrapKey reads of the unwrapping key object. */
 typedef struct
@@ -162,11 +161,11 @@ cleanup:
 }
 
 /*
- * The device's unwrapping key for the object `h`: a handle to its private
- * key, once the device key is shown to be the one whose modulus the object
- * carries. On the emulator every process provisions a fresh partition with a
- * fresh unwrapping key, so a token object from another process names a key
- * that is gone.
+ * A handle to the private key of the device's unwrapping key, once that key is
+ * shown to be the one whose modulus `obj` carries. Another partition's private
+ * key never gets here: its sealed record does not open in this partition. What
+ * the comparison still catches is a device key that changed under a kept
+ * masking key, or a forged record.
  */
 static CK_RV unwrapping_key_handle(
     const tsra_pkcs11_slot_t *slot,
@@ -182,20 +181,11 @@ static CK_RV unwrapping_key_handle(
     {
         return rv;
     }
-    tsra_pkcs11_rsa_public key;
-    if (!tsra_pkcs11_spki_rsa(spki, spki_len, &key) || (key.n_len != RSA_UNWRAP_MODULUS_BYTES))
-    {
-        TSRA_PKCS11_LOG("unwrapping key: not an RSA-%u public key", RSA_UNWRAP_KEY_BITS);
-        rv = CKR_DEVICE_ERROR;
-    }
-    else if ((obj->modulus_len != key.n_len) || (memcmp(obj->modulus, key.n, key.n_len) != 0))
-    {
-        TSRA_PKCS11_LOG("unwrapping key: the object names another partition's key");
-        rv = CKR_UNWRAPPING_KEY_HANDLE_INVALID;
-    }
+    rv = tsra_pkcs11_unwrapping_key_match(spki, spki_len, obj->modulus, obj->modulus_len);
     free(spki);
     if (rv != CKR_OK)
     {
+        TSRA_PKCS11_LOG("unwrapping_key_match failed: 0x%lx", (unsigned long)rv);
         tsra_pkcs11_key_release(dev);
         return rv;
     }
