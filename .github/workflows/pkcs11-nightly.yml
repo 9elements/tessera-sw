@@ -29,6 +29,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake pkg-config libbsd-dev libssl-dev opensc
 
+      # The module's CMake build generates tsra.h with cbindgen. Without one on
+      # PATH, Corrosion compiles the newest release into every build tree, so
+      # install the version xtask pins, once.
+      - name: Install the pinned cbindgen
+        run: |
+          set -euo pipefail
+          ver="$(sed -n 's/^const CARGO_CBINDGEN_VERSION: &str = "\([0-9.]*\)";$/\1/p' \
+            xtask/src/setup.rs)"
+          test -n "$ver"
+          cargo install --locked "cbindgen@$ver"
+          cbindgen --version
+
       - name: Build PKCS#11 module for hardware and the simulator
         run: |
           cargo build --target-dir "$RUNNER_TEMP/target" -p tsra_pkcs11
@@ -133,6 +145,18 @@ jobs:
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
             | sh -s -- -y --default-toolchain none --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      # The module's CMake build generates tsra.h with cbindgen. Without one on
+      # PATH, Corrosion compiles the newest release into every build tree, so
+      # install the version xtask pins, once.
+      - name: Install the pinned cbindgen
+        run: |
+          set -euo pipefail
+          ver="$(sed -n 's/^const CARGO_CBINDGEN_VERSION: &str = "\([0-9.]*\)";$/\1/p' \
+            xtask/src/setup.rs)"
+          test -n "$ver"
+          cargo install --locked "cbindgen@$ver"
+          cbindgen --version
 
       - name: Build PKCS#11 module for hardware and the simulator
         run: |
