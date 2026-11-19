@@ -8,6 +8,7 @@
 #include "tsra_pkcs11_digest.h"
 #include "tsra_pkcs11_template.h"
 
+#include <limits.h>
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -34,7 +35,7 @@ extern "C"
  */
 
 /* The OAEP block that starts every blob: one modulus of the unwrapping key. */
-#define RSA_UNWRAP_MODULUS_BYTES (RSA_UNWRAP_KEY_BITS / 8)
+#define RSA_UNWRAP_MODULUS_BYTES (RSA_UNWRAP_KEY_BITS / CHAR_BIT)
 
 /* What RFC 5649 adds to a key whose length is a multiple of 8 bytes, as every
  * AES key is: one integrity check block. */

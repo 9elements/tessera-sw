@@ -16,6 +16,7 @@
 #include <climits>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -39,6 +40,17 @@ namespace
 constexpr size_t kParts[] = { 1, 15, 16, 17, 33 };
 /// The one GCM tag length the device produces.
 constexpr CK_ULONG kGcmTagBits = 128;
+/// The AES key lengths in bytes.
+constexpr size_t kAesKeyBytes[] = { 16, 24, 32 };
+/// What RFC 5649 adds to a key whose length is a multiple of 8 bytes: one
+/// integrity check block.
+constexpr size_t kKwpOverhead = 8;
+
+/// Whether `n` bytes is an AES key length.
+bool is_aes_key_len(size_t n)
+{
+    return std::find(std::begin(kAesKeyBytes), std::end(kAesKeyBytes), n) != std::end(kAesKeyBytes);
+}
 
 } // namespace
 
@@ -178,8 +190,8 @@ TEST_F(unwrap_kat, aes_kwp_wycheproof_inside_the_unwrap)
         RsaAesMechanism m(CKM_SHA256, kek.size() * CHAR_BIT);
         host::Bytes blob = host::rsa_oaep_encrypt(host_pub_.get(), "SHA256", kek, host::Bytes());
         blob.insert(blob.end(), ct.begin(), ct.end());
-        bool aes_len = (msg.size() == 16) || (msg.size() == 24) || (msg.size() == 32);
-        bool fits = (ct.size() == 24) || (ct.size() == 32) || (ct.size() == 40);
+        bool aes_len = is_aes_key_len(msg.size());
+        bool fits = (ct.size() >= kKwpOverhead) && is_aes_key_len(ct.size() - kKwpOverhead);
         CK_ULONG before = count_objects(s_);
         CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
         CK_RV rv = unwrap_key(s_, priv_, &m.mech, blob, CKM_AES_CBC, &obj);

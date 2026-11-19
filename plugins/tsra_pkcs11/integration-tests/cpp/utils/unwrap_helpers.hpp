@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "utils/bytes.hpp"
 #include "utils/host_crypto.hpp"
 #include "utils/module.hpp"
 
@@ -102,8 +103,7 @@ inline host::Bytes rsa_aes_blob(
     host::Bytes out(magic, magic + sizeof(magic) - 1);
     for (size_t len : { size_t{ 1 }, key1.size(), key2.size(), size_t{ 0 } })
     {
-        out.push_back(static_cast<CK_BYTE>(len & 0xFF));
-        out.push_back(static_cast<CK_BYTE>(len >> 8));
+        put_le(out, len, sizeof(uint16_t));
     }
     out.insert(out.end(), key1.begin(), key1.end());
     out.insert(out.end(), key2.begin(), key2.end());
