@@ -17,8 +17,13 @@
 #define DER_BIT_STRING 0x03
 #define DER_OID 0x06
 #define DER_SEQUENCE 0x30
-/* Long-form length octets beyond this would describe more than 4 GiB. */
-#define DER_MAX_LEN_OCTETS 4
+/* A length byte with this bit set counts the length bytes that follow. */
+#define DER_LONG_FORM 0x80
+/* The most length bytes read: an RSA-2048 SubjectPublicKeyInfo is 294 bytes,
+ * so every length here is below 64 KiB. */
+#define DER_MAX_LEN_BYTES 2
+/* The sign bit of an INTEGER's first content byte. */
+#define DER_INTEGER_SIGN 0x80
 
 /* rsaEncryption, 1.2.840.113549.1.1.1 (RFC 3279), as DER content octets. */
 static const CK_BYTE OID_RSA_ENCRYPTION[] = {
@@ -394,7 +399,10 @@ CK_RV tsra_pkcs11_unwrapping_pair_check(
 
 /*
  * The DER element at *p, which must end by `end` and carry `tag`: *val and
- * *val_len receive its content, and *p moves past it.
+ * *val_len receive its content, and *p moves past it. Definite lengths up to
+ * DER_MAX_LEN_BYTES length bytes, in their minimal DER form: the long form
+ * only from 128 on and without a leading zero byte (as the EC reader in
+ * tsra_pkcs11_ec_template.c).
  */
 static bool der_next(
     const CK_BYTE **p,
@@ -410,17 +418,21 @@ static bool der_next(
         return false;
     }
     CK_ULONG len = *q++;
-    if ((len & 0x80u) != 0)
+    if ((len & DER_LONG_FORM) != 0)
     {
-        CK_ULONG octets = len & 0x7Fu;
-        if ((octets == 0) || (octets > DER_MAX_LEN_OCTETS) || ((CK_ULONG)(end - q) < octets))
+        CK_ULONG n = len & ~(CK_ULONG)DER_LONG_FORM;
+        if ((n == 0) || (n > DER_MAX_LEN_BYTES) || ((CK_ULONG)(end - q) < n) || (*q == 0))
         {
             return false;
         }
         len = 0;
-        for (CK_ULONG i = 0; i < octets; i++)
+        for (CK_ULONG i = 0; i < n; i++)
         {
-            len = (len << 8) | *q++;
+            len = (len << CHAR_BIT) | *q++;
+        }
+        if (len < DER_LONG_FORM)
+        {
+            return false; /* DER writes it in the short form */
         }
     }
     if ((CK_ULONG)(end - q) < len)
@@ -437,7 +449,7 @@ static bool der_next(
  * zeros; false for a negative or zero one. */
 static bool der_positive(const CK_BYTE **v, CK_ULONG *len)
 {
-    if ((*len == 0) || (((*v)[0] & 0x80u) != 0))
+    if ((*len == 0) || (((*v)[0] & DER_INTEGER_SIGN) != 0))
     {
         return false;
     }

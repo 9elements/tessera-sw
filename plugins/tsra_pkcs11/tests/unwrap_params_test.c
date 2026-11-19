@@ -15,12 +15,14 @@
  * unwrap template with its blob length rule for each key family (the XTS
  * container included), the unwrapping-key rule against a fake object, the
  * exact key pair template and its refusals, the templates stored for both
- * halves, and the SubjectPublicKeyInfo walk on a real RSA-1024 key and on
- * broken encodings.
+ * halves, and the SubjectPublicKeyInfo walk on a real RSA-1024 key, on
+ * broken encodings and on DER lengths around the short and long forms.
  */
 
 #include "tsra_pkcs11_unwrap_params.h"
 
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -776,6 +778,100 @@ static void test_build(void)
     );
 }
 
+/* ========================================================================= */
+/* DER lengths                                                               */
+/* ========================================================================= */
+
+/* What rsa_spki writes besides the fixed parts below. */
+#define TAG_INTEGER 0x02
+#define TAG_BIT_STRING 0x03
+#define TAG_SEQUENCE 0x30
+#define LONG_FORM 0x80
+#define TLV_HEAD 2   /* the tag and the first length byte */
+#define N_BYTE 0x5A  /* every modulus byte: positive, so no sign byte */
+#define SPKI_MAX 320 /* an SPKI with a modulus of up to 256 bytes */
+
+/* AlgorithmIdentifier { rsaEncryption, NULL } and INTEGER 65537 in DER. */
+static const CK_BYTE RSA_ALG[] = { 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+                                   0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00 };
+static const CK_BYTE E_65537[] = { 0x02, 0x03, 0x01, 0x00, 0x01 };
+
+/* The fewest long-form length bytes `len` needs; 0 for the short form. */
+static size_t min_len_bytes(size_t len)
+{
+    return (len < LONG_FORM) ? 0 : ((len <= UINT8_MAX) ? 1 : 2);
+}
+
+/* Write `tag` and `len` at out + *k, the length in `len_bytes` long-form
+ * length bytes (0 for the short form). */
+static void put_head(CK_BYTE *out, size_t *k, CK_BYTE tag, size_t len, size_t len_bytes)
+{
+    out[(*k)++] = tag;
+    if (len_bytes == 0)
+    {
+        out[(*k)++] = (CK_BYTE)len;
+        return;
+    }
+    out[(*k)++] = (CK_BYTE)(LONG_FORM | len_bytes);
+    for (size_t i = len_bytes; i > 0; i--)
+    {
+        out[(*k)++] = (CK_BYTE)(len >> (CHAR_BIT * (i - 1)));
+    }
+}
+
+/*
+ * An rsaEncryption SubjectPublicKeyInfo with exponent 65537 and a modulus of
+ * `n_len` N_BYTE bytes, whose INTEGER length takes `n_len_bytes` long-form
+ * length bytes (0 for the short form); every other length is minimal. Returns
+ * its length; `out` holds SPKI_MAX bytes.
+ */
+static size_t rsa_spki(CK_BYTE *out, size_t n_len, size_t n_len_bytes)
+{
+    size_t rsa = (TLV_HEAD + n_len_bytes + n_len) + sizeof(E_65537);
+    size_t bits = 1 + (TLV_HEAD + min_len_bytes(rsa) + rsa);
+    size_t outer = sizeof(RSA_ALG) + (TLV_HEAD + min_len_bytes(bits) + bits);
+    size_t k = 0;
+    put_head(out, &k, TAG_SEQUENCE, outer, min_len_bytes(outer));
+    memcpy(out + k, RSA_ALG, sizeof(RSA_ALG));
+    k += sizeof(RSA_ALG);
+    put_head(out, &k, TAG_BIT_STRING, bits, min_len_bytes(bits));
+    out[k++] = 0; /* no unused bits */
+    put_head(out, &k, TAG_SEQUENCE, rsa, min_len_bytes(rsa));
+    put_head(out, &k, TAG_INTEGER, n_len, n_len_bytes);
+    memset(out + k, N_BYTE, n_len);
+    k += n_len;
+    memcpy(out + k, E_65537, sizeof(E_65537));
+    return k + sizeof(E_65537);
+}
+
+static void test_der_lengths(void)
+{
+    printf("== spki_rsa: DER lengths ==\n");
+    /* Only the modulus length varies; DER allows exactly one encoding of it. */
+    struct
+    {
+        size_t n_len;
+        size_t len_bytes;
+        bool ok;
+        const char *what;
+    } rows[] = {
+        { 127, 0, true, "a 127-byte modulus with a short-form length is read" },
+        { 127, 1, false, "a 127-byte modulus with a long-form length is refused" },
+        { 128, 1, true, "a 128-byte modulus with one length byte is read" },
+        { 255, 1, true, "a 255-byte modulus with one length byte is read" },
+        { 255, 2, false, "a 255-byte modulus with a leading zero length byte is refused" },
+        { 256, 2, true, "a 256-byte modulus with two length bytes is read" },
+    };
+    for (size_t i = 0; i < COUNT(rows); i++)
+    {
+        CK_BYTE spki[SPKI_MAX];
+        size_t len = rsa_spki(spki, rows[i].n_len, rows[i].len_bytes);
+        tsra_pkcs11_rsa_public key;
+        bool ok = tsra_pkcs11_spki_rsa(spki, len, &key);
+        CHECK((ok == rows[i].ok) && (!ok || (key.n_len == rows[i].n_len)), rows[i].what);
+    }
+}
+
 int main(void)
 {
     test_params();
@@ -783,6 +879,7 @@ int main(void)
     test_unwrapping_key();
     test_pair_check();
     test_build();
+    test_der_lengths();
     printf(
         g_fail ? "\nunwrap_params_test: FAILED (%d checks)\n"
                : "\nunwrap_params_test: all %d checks passed\n",
