@@ -2,8 +2,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 #
-# Runs the checks of the CI workflow's build-and-drive and unit-tests jobs in
-# one go. Builds the standalone no-device module and drives it with OpenSC
+# Runs the checks of the CI workflow (pkcs11.yml) in one go, except two.
+# Builds the standalone no-device module and drives it with OpenSC
 # pkcs11-tool, and runs the device-free unit harnesses under UBSan and ASan
 # (build_units.sh); if the product module has been built (cargo build -p
 # tsra_pkcs11; TSRA_PKCS11_MODULE overrides its path), it also
@@ -12,9 +12,9 @@
 # pair generation and a refused pkcs11-tool key import, the gtest functional suite
 # (integration-tests/cpp) on the memory and the file object store, the
 # pkcs11test conformance gate (tests/pkcs11test) and the per-PR part of the
-# pkcs11-check gate (tests/pkcs11-check) against the simulator. The
-# workflow's ASan module build (functional-asan) and its libFuzzer run
-# (template-fuzz, which needs clang) are not repeated here.
+# pkcs11-check gate (tests/pkcs11-check) against the simulator. The two it
+# leaves out are the functional suite on an ASan build of the module and the
+# libFuzzer run, which needs clang.
 #
 # pkcs11-tool is expected locally (extracted from a distro package, no system
 # install). Point PKCS11_TESTING at that directory; it defaults to the
