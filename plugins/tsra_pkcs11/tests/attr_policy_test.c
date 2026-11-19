@@ -914,6 +914,25 @@ static void test_create(void)
     );
 }
 
+/* DER around a CKA_EC_POINT: the OCTET STRING tag, then its length, in one
+ * byte below DER_LONG_FORM, else DER_LEN_1 and one length byte (enough for
+ * every point here). */
+#define TAG_OCTET_STRING 0x04
+#define DER_LONG_FORM 0x80
+#define DER_LEN_1 (DER_LONG_FORM | 1)
+#define DER_LEN_2 (DER_LONG_FORM | 2)
+#define DER_HEADER_SHORT 2 /* the tag and a one-byte length */
+#define DER_HEADER_MAX 3   /* the tag, DER_LEN_1 and the length */
+/* The point inside (SEC 1): the first byte, then both coordinates. */
+#define POINT_UNCOMPRESSED 0x04
+#define POINT_COMPRESSED_EVEN 0x02
+#define POINT_LEN(coord) (1 + (2 * (coord)))
+#define POINT_FILL 0x5A /* any coordinate byte: whether it lies on the curve is not checked */
+/* The coordinate lengths of P-256, P-384 and P-521. */
+#define COORD_P256 32
+#define COORD_P384 48
+#define COORD_P521 66
+
 /* An EC public key template: class, type, the curve and the point. */
 static CK_RV create_ec(
     const void *params,
@@ -936,16 +955,16 @@ static CK_RV create_ec(
  * STRING header, then 0x04 and both coordinates; returns the length. */
 static CK_ULONG ec_point(CK_BYTE *out, CK_ULONG coord)
 {
-    CK_ULONG len = 1 + (2 * coord);
+    CK_ULONG len = POINT_LEN(coord);
     CK_ULONG h = 0;
-    out[h++] = 0x04;
-    if (len >= 0x80)
+    out[h++] = TAG_OCTET_STRING;
+    if (len >= DER_LONG_FORM)
     {
-        out[h++] = 0x81;
+        out[h++] = DER_LEN_1;
     }
     out[h++] = (CK_BYTE)len;
-    out[h] = 0x04;
-    memset(out + h + 1, 0x5A, len - 1);
+    out[h] = POINT_UNCOMPRESSED;
+    memset(out + h + 1, POINT_FILL, len - 1);
     return h + len;
 }
 
@@ -956,12 +975,12 @@ static void test_public_keys(void)
     static const CK_BYTE p521[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23 };
     static const CK_BYTE k256[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a }; /* secp256k1 */
     static const CK_BYTE cut[] = { 0x06, 0x05, 0x2b, 0x81, 0x04 };
-    CK_BYTE pt256[3 + 65];
-    CK_BYTE pt384[3 + 97];
-    CK_BYTE pt521[3 + 133];
-    CK_ULONG n256 = ec_point(pt256, 32);
-    CK_ULONG n384 = ec_point(pt384, 48);
-    CK_ULONG n521 = ec_point(pt521, 66);
+    CK_BYTE pt256[DER_HEADER_MAX + POINT_LEN(COORD_P256)];
+    CK_BYTE pt384[DER_HEADER_MAX + POINT_LEN(COORD_P384)];
+    CK_BYTE pt521[DER_HEADER_MAX + POINT_LEN(COORD_P521)];
+    CK_ULONG n256 = ec_point(pt256, COORD_P256);
+    CK_ULONG n384 = ec_point(pt384, COORD_P384);
+    CK_ULONG n521 = ec_point(pt521, COORD_P521);
     CHECK(create_ec(p256, sizeof(p256), pt256, n256) == CKR_OK, "a P-256 key -> OK");
     CHECK(
         create_ec(p521, sizeof(p521), pt521, n521) == CKR_OK,
@@ -980,12 +999,13 @@ static void test_public_keys(void)
         "a P-384 point on P-256 -> VALUE_INVALID"
     );
     CHECK(
-        create_ec(p256, sizeof(p256), pt256 + 2, n256 - 2) == CKR_ATTRIBUTE_VALUE_INVALID,
+        create_ec(p256, sizeof(p256), pt256 + DER_HEADER_SHORT, n256 - DER_HEADER_SHORT) ==
+            CKR_ATTRIBUTE_VALUE_INVALID,
         "a bare point without its OCTET STRING -> VALUE_INVALID"
     );
     CK_BYTE compressed[sizeof(pt256)];
     memcpy(compressed, pt256, n256);
-    compressed[2] = 0x02;
+    compressed[DER_HEADER_SHORT] = POINT_COMPRESSED_EVEN;
     CHECK(
         create_ec(p256, sizeof(p256), compressed, n256) == CKR_ATTRIBUTE_VALUE_INVALID,
         "a compressed point -> VALUE_INVALID"
@@ -1002,14 +1022,21 @@ static void test_public_keys(void)
         "a byte after the OCTET STRING -> VALUE_INVALID"
     );
     /* The P-256 point with its length in a form DER does not allow: the long
-     * form below 128, and a leading zero length byte. */
-    CK_BYTE long_form[sizeof(pt256) + 1] = { 0x04, 0x81 };
-    memcpy(long_form + 2, pt256 + 1, n256 - 1);
-    CK_BYTE zero_len[sizeof(pt256) + 2] = { 0x04, 0x82, 0x00 };
-    memcpy(zero_len + 3, pt256 + 1, n256 - 1);
+     * form below 128, and a leading zero length byte. Each is its header, then
+     * pt256 from its length byte on. */
+    static const CK_BYTE long_hdr[] = { TAG_OCTET_STRING, DER_LEN_1 };
+    static const CK_BYTE zero_hdr[] = { TAG_OCTET_STRING, DER_LEN_2, 0 };
+    CK_BYTE long_form[sizeof(long_hdr) + sizeof(pt256)];
+    CK_BYTE zero_len[sizeof(zero_hdr) + sizeof(pt256)];
+    memcpy(long_form, long_hdr, sizeof(long_hdr));
+    memcpy(long_form + sizeof(long_hdr), pt256 + 1, n256 - 1);
+    memcpy(zero_len, zero_hdr, sizeof(zero_hdr));
+    memcpy(zero_len + sizeof(zero_hdr), pt256 + 1, n256 - 1);
     CHECK(
-        (create_ec(p256, sizeof(p256), long_form, n256 + 1) == CKR_ATTRIBUTE_VALUE_INVALID) &&
-            (create_ec(p256, sizeof(p256), zero_len, n256 + 2) == CKR_ATTRIBUTE_VALUE_INVALID),
+        (create_ec(p256, sizeof(p256), long_form, sizeof(long_hdr) + n256 - 1) ==
+         CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (create_ec(p256, sizeof(p256), zero_len, sizeof(zero_hdr) + n256 - 1) ==
+             CKR_ATTRIBUTE_VALUE_INVALID),
         "a non-minimal DER length -> VALUE_INVALID"
     );
 
@@ -1028,6 +1055,11 @@ static void test_public_keys(void)
         (create(no_point, COUNT(no_point)) == CKR_TEMPLATE_INCOMPLETE) &&
             (create(no_params, COUNT(no_params)) == CKR_TEMPLATE_INCOMPLETE),
         "an EC key without its point or its curve -> TEMPLATE_INCOMPLETE"
+    );
+    CHECK(
+        (create_ec(p256, sizeof(p256), NULL, 0) == CKR_ATTRIBUTE_VALUE_INVALID) &&
+            (create_ec(NULL, 0, pt256, n256) == CKR_ATTRIBUTE_VALUE_INVALID),
+        "an empty EC point or curve -> VALUE_INVALID"
     );
     CK_ATTRIBUTE no_point_bad_curve[] = {
         ATTR(CKA_CLASS, g_public),

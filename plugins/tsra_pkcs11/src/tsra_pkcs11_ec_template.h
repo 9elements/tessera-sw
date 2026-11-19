@@ -61,9 +61,11 @@ CK_ULONG tsra_pkcs11_ec_coord_len(tsra_pkcs11_ec_curve_t curve);
 /*
  * Whether a CKA_EC_POINT value is a point of `curve` as this token stores
  * one: a DER OCTET STRING holding the uncompressed point, 0x04 then both
- * coordinates. CKR_OK if so, else CKR_ATTRIBUTE_VALUE_INVALID: a bare point
- * without the OCTET STRING, a compressed point, a length of another curve, or
- * bytes after the string. Whether the point lies on the curve is not checked.
+ * coordinates. CKR_OK if so, else CKR_ATTRIBUTE_VALUE_INVALID: a NULL value,
+ * a `curve` the token does not support (TSRA_PKCS11_CURVE_NONE included), a
+ * bare point without the OCTET STRING, a compressed point, a length of
+ * another curve, or bytes after the string. Whether the point lies on the
+ * curve is not checked.
  */
 CK_RV tsra_pkcs11_ec_point_check(const void *value, CK_ULONG len, tsra_pkcs11_ec_curve_t curve);
 
