@@ -133,7 +133,8 @@ struct RsaAesMechanism
 };
 
 /// C_UnwrapKey of `blob` into a key for the cipher `family` (CKM_AES_CBC for a
-/// plain AES key, CKM_AES_GCM or CKM_AES_XTS), public, without CKA_VALUE_LEN.
+/// plain AES key, CKM_AES_GCM or CKM_AES_XTS), without CKA_VALUE_LEN: public
+/// as a session key, private on the token, where a secret key must be private.
 inline CK_RV unwrap_key(
     CK_SESSION_HANDLE s,
     CK_OBJECT_HANDLE unwrapping,
@@ -146,12 +147,12 @@ inline CK_RV unwrap_key(
 {
     CK_OBJECT_CLASS cls = CKO_SECRET_KEY;
     CK_KEY_TYPE kt = (family == CKM_AES_XTS) ? CKK_AES_XTS : CKK_AES;
-    CK_BBOOL no = CK_FALSE;
+    CK_BBOOL priv = token;
     CK_MECHANISM_TYPE gcm = CKM_AES_GCM;
     CK_ATTRIBUTE tmpl[] = {
         { CKA_CLASS, &cls, sizeof(cls) },
         { CKA_KEY_TYPE, &kt, sizeof(kt) },
-        { CKA_PRIVATE, &no, sizeof(no) },
+        { CKA_PRIVATE, &priv, sizeof(priv) },
         { CKA_TOKEN, &token, sizeof(token) },
         { CKA_ALLOWED_MECHANISMS, &gcm, sizeof(gcm) }, /* GCM keys only */
     };

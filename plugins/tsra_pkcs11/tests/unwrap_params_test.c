@@ -314,6 +314,22 @@ static void test_template(void)
         target(open, 3, BLOB(16), &out) == CKR_TEMPLATE_INCONSISTENT,
         "not sensitive -> CKR_TEMPLATE_INCONSISTENT"
     );
+    CK_ATTRIBUTE public_session[] = {
+        ATTR(CKA_CLASS, g_secret),
+        ATTR(CKA_KEY_TYPE, g_aes),
+        ATTR(CKA_PRIVATE, g_false),
+    };
+    CK_ATTRIBUTE public_token[] = {
+        ATTR(CKA_CLASS, g_secret),
+        ATTR(CKA_KEY_TYPE, g_aes),
+        ATTR(CKA_PRIVATE, g_false),
+        ATTR(CKA_TOKEN, g_true),
+    };
+    CHECK(
+        (target(public_session, 3, BLOB(16), &out) == CKR_OK) &&
+            (target(public_token, 4, BLOB(16), &out) == CKR_TEMPLATE_INCONSISTENT),
+        "a token key must be private; a session one need not be"
+    );
     CK_ATTRIBUTE local[] = {
         ATTR(CKA_CLASS, g_secret),
         ATTR(CKA_KEY_TYPE, g_aes),
