@@ -400,18 +400,24 @@ CK_RV tsra_pkcs11_destroy_check(CK_BBOOL rw_session, tsra_pkcs11_attr_reader rea
 }
 
 /*
- * A public key of a type this token uses needs what it cannot be used
- * without: an EC key its curve, one the token supports, and a point encoded
- * for that curve; an RSA key its modulus and exponent, neither empty. Other
- * key types are stored as given.
+ * A public key needs the attributes PKCS#11 v3.1 requires at C_CreateObject
+ * (footnote 1 of the common key, RSA and EC public key attribute tables): its
+ * key type; for an EC key the curve, one the token supports, and a point
+ * encoded for that curve; for an RSA key the modulus and exponent, neither
+ * empty. Public keys of other types are stored as given.
  */
 static CK_RV public_key_check(const CK_ATTRIBUTE *tmpl, CK_ULONG count)
 {
     CK_ULONG kt = 0;
     const CK_ATTRIBUTE *type = tsra_pkcs11_tmpl_find(tmpl, count, CKA_KEY_TYPE);
-    if ((type == NULL) || (tsra_pkcs11_tmpl_ulong(type, &kt) != CKR_OK))
+    if (type == NULL)
     {
-        return CKR_OK;
+        return CKR_TEMPLATE_INCOMPLETE;
+    }
+    CK_RV rv = tsra_pkcs11_tmpl_ulong(type, &kt);
+    if (rv != CKR_OK)
+    {
+        return rv;
     }
     if (kt == CKK_RSA)
     {
@@ -434,7 +440,7 @@ static CK_RV public_key_check(const CK_ATTRIBUTE *tmpl, CK_ULONG count)
         return CKR_TEMPLATE_INCOMPLETE;
     }
     tsra_pkcs11_ec_curve_t curve = TSRA_PKCS11_CURVE_NONE;
-    CK_RV rv = tsra_pkcs11_ec_params_curve(params->pValue, params->ulValueLen, &curve);
+    rv = tsra_pkcs11_ec_params_curve(params->pValue, params->ulValueLen, &curve);
     return (rv == CKR_OK) ? tsra_pkcs11_ec_point_check(point->pValue, point->ulValueLen, curve)
                           : rv;
 }
