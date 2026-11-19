@@ -56,7 +56,7 @@ this module:
 | `rng` | Tests of the generator itself that go through the patched helper below, so they pass on host bytes. |
 | `presence-only` | Claim that a token key persists, but only find the object again. Key survival needs the key used, which the GoogleTest suite does (`key_survival.*`). |
 | `tool` | Check pkcs11-check's own tables, not the module. |
-| `environment` | Depend on host tools (p11-kit) the gate does not pin. |
+| `environment` | Depend on host tools (p11-kit) the gate does not pin, or on how much memory the host can map: a count of 2^32 is checked only where the host can map the array it claims, and is a note elsewhere. |
 | `timing` | Benchmarks and timing ratios: no verdict, or flaky on shared runners. |
 | `import-refused` | Set up a plaintext key, which `C_CreateObject` refuses, and pass on that refusal without reaching what they test. |
 | `crash` | Known crashes. None at present. |
