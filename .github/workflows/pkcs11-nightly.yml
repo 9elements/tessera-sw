@@ -5,7 +5,8 @@
 # the per-PR budget of pkcs11.yml. GitHub runs a schedule only from the default
 # branch, so the schedule starts once the module is on main; until then the
 # workflow runs on manual dispatch. Build output goes to $RUNNER_TEMP. The checks
-# run in one job; only the pkcs11-provider run needs a container of its own.
+# run in one job per Ubuntu release, 24.04 and 26.04, with the same steps on
+# both; only the pkcs11-provider run needs a container of its own.
 name: pkcs11-nightly
 
 on:
@@ -14,11 +15,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  # The external tools and the sanitizer suite on one runner. Each check is its
-  # own step that runs even after an earlier one failed, so a red one does not
-  # hide the others.
+  # The external tools and the sanitizer suite on one runner per release. Each
+  # check is its own step that runs even after an earlier one failed, so a red
+  # one does not hide the others.
   build-and-test:
-    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false # a failure on one release must not cancel the other
+      matrix:
+        os: [ ubuntu-24.04, ubuntu-26.04 ]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

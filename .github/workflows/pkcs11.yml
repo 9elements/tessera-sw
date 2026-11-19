@@ -10,9 +10,10 @@
 # covers init/login, host objects, the SHA digests, and AES keygen with CBC,
 # GCM and XTS. Build output goes to $RUNNER_TEMP, never into the checkout.
 #
-# Every check runs in one job, so a run takes one runner. The steps that were
-# jobs of their own (the unit harnesses, the fuzzer and the ASan suite) run
-# even after an earlier step failed, so a red check does not hide them.
+# Every check runs in one job per Ubuntu release, 24.04 and 26.04, with the
+# same steps on both, so a run takes two runners. The steps that were jobs of
+# their own (the unit harnesses, the fuzzer and the ASan suite) run even after
+# an earlier step failed, so a red check does not hide them.
 name: pkcs11
 
 on:
@@ -25,7 +26,11 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false # a failure on one release must not cancel the other
+      matrix:
+        os: [ ubuntu-24.04, ubuntu-26.04 ]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
