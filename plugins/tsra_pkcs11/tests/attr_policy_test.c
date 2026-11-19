@@ -19,8 +19,9 @@
  * rejects, duplicates, the TYPE_INVALID vs READ_ONLY split for unlisted types,
  * and first-failure-wins ordering; and for C_CreateObject the ceilings, the
  * class rows (no class, key classes with and without key material), the
- * provenance rows and the per-attribute verdicts, and the EC and RSA public
- * keys (curve, point and the attributes each cannot be used without).
+ * provenance rows and the per-attribute verdicts, and the public keys (the
+ * key type, and for EC and RSA keys the curve, the point and the other
+ * attributes PKCS#11 requires).
  */
 
 #include "tsra_pkcs11_attr_policy.h"
@@ -60,6 +61,10 @@ static CK_OBJECT_CLASS g_cert = CKO_CERTIFICATE;
  * CKO_SECRET_KEY: read as a class it would wrongly unlock the key rules. */
 static CK_OBJECT_CLASS g_wide_class[2] = { CKO_SECRET_KEY, CKO_SECRET_KEY };
 static CK_KEY_TYPE g_aes = CKK_AES;
+static CK_KEY_TYPE g_rsa = CKK_RSA;
+/* Any non-empty value: the policy reads no number. */
+static CK_BYTE g_modulus[] = { 0xC1, 0x02, 0x03, 0x04 };
+static CK_BYTE g_e65537[] = { 0x01, 0x00, 0x01 };
 static CK_ULONG g_len32 = 32;
 static CK_BYTE g_secret_bytes[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
 static char g_label[] = "unit";
@@ -673,6 +678,19 @@ static CK_RV create_with(CK_OBJECT_CLASS cls, CK_ATTRIBUTE extra)
     return create(t, COUNT(t));
 }
 
+/* A complete RSA public key template plus one more attribute. */
+static CK_RV create_rsa_with(CK_ATTRIBUTE extra)
+{
+    CK_ATTRIBUTE t[] = {
+        ATTR(CKA_CLASS, g_public),
+        ATTR(CKA_KEY_TYPE, g_rsa),
+        ATTR(CKA_MODULUS, g_modulus),
+        ATTR(CKA_PUBLIC_EXPONENT, g_e65537),
+        extra,
+    };
+    return create(t, COUNT(t));
+}
+
 static void test_create(void)
 {
     printf("== C_CreateObject: arguments and token ==\n");
@@ -756,7 +774,7 @@ static void test_create(void)
         "a certificate with CKA_VALUE"
     );
     CHECK(
-        create_with(g_public, (CK_ATTRIBUTE)ATTR(CKA_MODULUS, g_secret_bytes)) == CKR_OK,
+        create_rsa_with((CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label)) == CKR_OK,
         "a public key without key material"
     );
     static const CK_OBJECT_CLASS unsupported[] = {
@@ -819,7 +837,7 @@ static void test_create(void)
             (create_with(g_data, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_true)) ==
              CKR_ATTRIBUTE_READ_ONLY);
         ok &=
-            (create_with(g_public, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_false)) ==
+            (create_rsa_with((CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_false)) ==
              CKR_ATTRIBUTE_READ_ONLY);
         ok &=
             (create_with(g_cert, (CK_ATTRIBUTE)BOOL_ATTR(provenance[i], g_true)) ==
@@ -835,13 +853,12 @@ static void test_create(void)
     );
     CHECK(
         (create_with(g_cert, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK) &&
-            (create_with(g_public, (CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK),
+            (create_rsa_with((CK_ATTRIBUTE)BOOL_ATTR(CKA_TRUSTED, g_false)) == CKR_OK),
         "CKA_TRUSTED=FALSE, the default -> OK"
     );
     CK_MECHANISM_TYPE kgm = CKM_AES_KEY_GEN;
     CHECK(
-        create_with(g_public, (CK_ATTRIBUTE)ATTR(CKA_KEY_GEN_MECHANISM, kgm)) ==
-            CKR_ATTRIBUTE_READ_ONLY,
+        create_rsa_with((CK_ATTRIBUTE)ATTR(CKA_KEY_GEN_MECHANISM, kgm)) == CKR_ATTRIBUTE_READ_ONLY,
         "CKA_KEY_GEN_MECHANISM -> READ_ONLY"
     );
     CHECK(
@@ -1022,14 +1039,11 @@ static void test_public_keys(void)
         "a missing attribute is reported before a curve the token lacks"
     );
 
-    CK_KEY_TYPE rsa = CKK_RSA;
-    CK_BYTE n[] = { 0xC1, 0x02, 0x03, 0x04 };
-    CK_BYTE e[] = { 0x01, 0x00, 0x01 };
     CK_ATTRIBUTE rsa_ok[] = {
         ATTR(CKA_CLASS, g_public),
-        ATTR(CKA_KEY_TYPE, rsa),
-        ATTR(CKA_MODULUS, n),
-        ATTR(CKA_PUBLIC_EXPONENT, e),
+        ATTR(CKA_KEY_TYPE, g_rsa),
+        ATTR(CKA_MODULUS, g_modulus),
+        ATTR(CKA_PUBLIC_EXPONENT, g_e65537),
     };
     CHECK(create(rsa_ok, COUNT(rsa_ok)) == CKR_OK, "an RSA key with modulus and exponent -> OK");
     CK_ATTRIBUTE rsa_no_modulus[] = { rsa_ok[0], rsa_ok[1], rsa_ok[3] };
@@ -1050,10 +1064,11 @@ static void test_public_keys(void)
     );
     CK_KEY_TYPE dsa = CKK_DSA;
     CK_ATTRIBUTE other[] = { ATTR(CKA_CLASS, g_public), ATTR(CKA_KEY_TYPE, dsa) };
-    CK_ATTRIBUTE untyped[] = { ATTR(CKA_CLASS, g_public), ATTR(CKA_LABEL, g_label) };
+    CHECK(create(other, COUNT(other)) == CKR_OK, "another key type is stored as given");
+    CK_ATTRIBUTE untyped[] = { rsa_ok[0], rsa_ok[2], rsa_ok[3] };
     CHECK(
-        (create(other, COUNT(other)) == CKR_OK) && (create(untyped, COUNT(untyped)) == CKR_OK),
-        "another key type, or none, is stored as given"
+        create(untyped, COUNT(untyped)) == CKR_TEMPLATE_INCOMPLETE,
+        "a public key without CKA_KEY_TYPE -> TEMPLATE_INCOMPLETE"
     );
     CK_ATTRIBUTE data_ec[] = {
         ATTR(CKA_CLASS, g_data),

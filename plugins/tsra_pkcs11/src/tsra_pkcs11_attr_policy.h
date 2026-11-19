@@ -56,6 +56,7 @@ extern "C"
  *                                 material (tsra_pkcs11_attr_is_key_material)
  *   CKR_TEMPLATE_INCOMPLETE       a secret or private key without it, which
  *                                 PKCS#11 requires
+ *   CKR_TEMPLATE_INCOMPLETE       a public key without CKA_KEY_TYPE
  *   then for a public key of type CKK_EC or CKK_RSA:
  *   CKR_TEMPLATE_INCOMPLETE       an EC key without CKA_EC_PARAMS or
  *                                 CKA_EC_POINT, an RSA key without CKA_MODULUS

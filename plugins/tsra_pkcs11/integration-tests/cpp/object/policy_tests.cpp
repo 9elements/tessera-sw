@@ -55,6 +55,19 @@ CK_RV create(CK_SESSION_HANDLE s, std::vector<CK_ATTRIBUTE> tmpl, CK_OBJECT_HAND
     return p11()->C_CreateObject(s, tmpl.data(), static_cast<CK_ULONG>(tmpl.size()), out);
 }
 
+/// A complete RSA public key, a published one: class, key type, modulus and
+/// exponent.
+std::vector<CK_ATTRIBUTE> rsa_public_key()
+{
+    static CK_KEY_TYPE rsa = CKK_RSA;
+    static std::vector<CK_BYTE> n = vectors::hex(vectors::kRsaOaepKey0.n);
+    static std::vector<CK_BYTE> e = vectors::hex(vectors::kRsaOaepKey0.e);
+    return { { CKA_CLASS, &g_public, sizeof(g_public) },
+             { CKA_KEY_TYPE, &rsa, sizeof(rsa) },
+             { CKA_MODULUS, n.data(), static_cast<CK_ULONG>(n.size()) },
+             { CKA_PUBLIC_EXPONENT, e.data(), static_cast<CK_ULONG>(e.size()) } };
+}
+
 CK_ATTRIBUTE label_attr(const char *label)
 {
     return { CKA_LABEL, const_cast<char *>(label), static_cast<CK_ULONG>(std::strlen(label)) };
@@ -181,6 +194,8 @@ TEST_F(object_policy, ec_and_rsa_public_keys_need_what_they_are_used_with)
         << "no exponent";
     EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, rsa_type, exponent }, &h))
         << "no modulus";
+    EXPECT_CKR(CKR_TEMPLATE_INCOMPLETE, create(s_, { cls, modulus, exponent }, &h))
+        << "no key type";
     EXPECT_EQ(CK_INVALID_HANDLE, h) << "a refused template hands out no object";
 }
 
@@ -430,20 +445,13 @@ TEST_F(object_policy, dates_are_checked_at_create)
 {
     CK_DATE good = { { '2', '0', '2', '6' }, { '1', '1' }, { '0', '4' } };
     CK_DATE bad = { { '2', '0', '2', '6' }, { '1', '3' }, { '0', '4' } };
+    std::vector<CK_ATTRIBUTE> bad_key = rsa_public_key();
+    bad_key.push_back({ CKA_END_DATE, &bad, sizeof(bad) });
+    std::vector<CK_ATTRIBUTE> good_key = rsa_public_key();
+    good_key.push_back({ CKA_END_DATE, &good, sizeof(good) });
     CK_OBJECT_HANDLE h = 0;
-    EXPECT_CKR(
-        CKR_ATTRIBUTE_VALUE_INVALID,
-        create(
-            s_,
-            { { CKA_CLASS, &g_public, sizeof(g_public) }, { CKA_END_DATE, &bad, sizeof(bad) } },
-            &h
-        )
-    );
-    EXPECT_CKR_OK(create(
-        s_,
-        { { CKA_CLASS, &g_public, sizeof(g_public) }, { CKA_END_DATE, &good, sizeof(good) } },
-        &h
-    ));
+    EXPECT_CKR(CKR_ATTRIBUTE_VALUE_INVALID, create(s_, bad_key, &h)) << "there is no month 13";
+    EXPECT_CKR_OK(create(s_, good_key, &h)) << "the same key with a valid date";
 }
 
 TEST_F(object_policy, set_attribute_refuses_arrays_and_huge_values)
