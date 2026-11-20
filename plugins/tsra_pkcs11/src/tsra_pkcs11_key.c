@@ -354,6 +354,9 @@ CK_RV tsra_pkcs11_key_aes_unwrap(
     if (st != TSRA_STATUS_SUCCESS)
     {
         TSRA_PKCS11_LOG("key_unwrap(kind %u, %u bits) failed: %d", dev_kind, bit_len, (int)st);
+        /* One code for every status, not tsra_pkcs11_ckr_from_tsra_hint: a
+         * caller who can tell an OAEP failure from a key-wrap failure holds a
+         * decryption oracle. */
         return CKR_WRAPPED_KEY_INVALID;
     }
     CK_RV rv = get_prop_alloc(key, TSRA_KEY_PROP_ID_MASKED_KEY, out_blob, out_blob_len);
