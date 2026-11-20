@@ -337,6 +337,8 @@ static CK_RV half_check(bool priv, const CK_ATTRIBUTE *tmpl, CK_ULONG count, CK_
                                                                 : CKR_ATTRIBUTE_VALUE_INVALID;
                 break;
             case CKA_ALLOWED_MECHANISMS:
+                /* tsra_pkcs11_attr_check refused a length that is not whole
+                 * mechanism types, so the division below drops nothing. */
                 rv = (a->ulValueLen > 0) ? CKR_OK : CKR_TEMPLATE_INCONSISTENT;
                 for (CK_ULONG m = 0;
                      (rv == CKR_OK) && (m < (a->ulValueLen / sizeof(CK_MECHANISM_TYPE)));

@@ -642,6 +642,13 @@ static void test_pair_check(void)
             (pair(pub, 2, allowed_empty, 2) == CKR_TEMPLATE_INCONSISTENT),
         "CKA_ALLOWED_MECHANISMS may name CKM_RSA_AES_KEY_WRAP only"
     );
+    CK_ATTRIBUTE allowed_ragged[] = { priv[0],
+                                      { CKA_ALLOWED_MECHANISMS, mixed, sizeof(wrap_mech) + 1 } };
+    CHECK(
+        pair(pub, 2, allowed_ragged, 2) == CKR_ATTRIBUTE_VALUE_INVALID,
+        "a CKA_ALLOWED_MECHANISMS length that is not whole mechanism types is refused, not "
+        "truncated"
+    );
     CK_ATTRIBUTE dup[] = { priv[0], priv[0] };
     CK_BYTE d[4] = { 1, 2, 3, 4 };
     CK_ATTRIBUTE material[] = { priv[0], ATTR(CKA_PRIVATE_EXPONENT, d) };
