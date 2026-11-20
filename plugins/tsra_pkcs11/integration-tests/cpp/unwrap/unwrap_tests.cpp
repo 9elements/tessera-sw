@@ -7,8 +7,9 @@
 /// the host wraps, every OAEP hash and key-encryption key size, the attributes
 /// an unwrapped key gets, the mechanism, template and unwrapping-key rules,
 /// one uniform CKR_WRAPPED_KEY_INVALID and no object for every bad blob, the
-/// refused C_WrapKey, survival across a relogin, the leak gate, and that the
-/// file store never sees the key.
+/// checks that come first (initialized, session, arguments), the refused
+/// C_WrapKey, survival across a relogin, the leak gate, and that the file
+/// store never sees the key.
 
 #include <climits>
 #include <cstring>
@@ -296,6 +297,77 @@ TEST_F(unwrap, mechanism_rules)
         m.oaep.source = 0;
         EXPECT_CKR(CKR_MECHANISM_PARAM_INVALID, run(&m.mech)) << "no source";
     }
+}
+
+TEST_F(unwrap, needs_an_initialized_module)
+{
+    host::Bytes blob = blob_of(host::Bytes(AES128_KEY_BYTES, 0x16));
+    RsaAesMechanism m;
+    CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
+    ASSERT_CKR_OK(p11()->C_Finalize(nullptr));
+    CK_RV rv = unwrap_key(s_, priv_, &m.mech, blob, CKM_AES_CBC, &obj);
+    CK_RV rv_null =
+        p11()->C_UnwrapKey(kInvalidSession, nullptr, 0, nullptr, 1, nullptr, 1, nullptr);
+    s_ = 0;
+    ASSERT_CKR_OK(p11()->C_Initialize(nullptr));
+    ASSERT_CKR_OK(
+        p11()->C_OpenSession(kSlot, CKF_SERIAL_SESSION | CKF_RW_SESSION, nullptr, nullptr, &s_)
+    );
+    ASSERT_CKR_OK(login_user(s_));
+    EXPECT_CKR(CKR_CRYPTOKI_NOT_INITIALIZED, rv) << "a finalized module unwraps nothing";
+    EXPECT_CKR(CKR_CRYPTOKI_NOT_INITIALIZED, rv_null) << "before the session and the arguments";
+    EXPECT_EQ(CK_INVALID_HANDLE, obj);
+}
+
+TEST_F(unwrap, session_handle_is_checked_before_mechanism_and_arguments)
+{
+    host::Bytes blob = blob_of(host::Bytes(AES128_KEY_BYTES, 0x16));
+    RsaAesMechanism m;
+    CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
+    EXPECT_CKR(
+        CKR_SESSION_HANDLE_INVALID,
+        unwrap_key(kInvalidSession, priv_, &m.mech, blob, CKM_AES_CBC, &obj)
+    ) << "an unknown session";
+    EXPECT_CKR(
+        CKR_SESSION_HANDLE_INVALID,
+        p11()->C_UnwrapKey(kInvalidSession, nullptr, priv_, nullptr, 1, nullptr, 1, nullptr)
+    ) << "before the arguments";
+    EXPECT_EQ(CK_INVALID_HANDLE, obj);
+}
+
+TEST_F(unwrap, arguments_are_checked_before_mechanism)
+{
+    host::Bytes blob = blob_of(host::Bytes(AES128_KEY_BYTES, 0x16));
+    CK_BYTE_PTR data = const_cast<CK_BYTE_PTR>(blob.data());
+    CK_ULONG len = static_cast<CK_ULONG>(blob.size());
+    CK_OBJECT_CLASS cls = CKO_SECRET_KEY;
+    CK_KEY_TYPE kt = CKK_AES;
+    CK_ATTRIBUTE tmpl[] = { { CKA_CLASS, &cls, sizeof(cls) }, { CKA_KEY_TYPE, &kt, sizeof(kt) } };
+    RsaAesMechanism m;
+    CK_OBJECT_HANDLE good = CK_INVALID_HANDLE;
+    ASSERT_CKR_OK(p11()->C_UnwrapKey(s_, &m.mech, priv_, data, len, tmpl, std::size(tmpl), &good))
+        << "the call with every argument";
+    CK_MECHANISM oaep = { CKM_RSA_PKCS_OAEP, nullptr, 0 };
+    CK_OBJECT_HANDLE obj = CK_INVALID_HANDLE;
+    CK_ULONG before = count_objects(s_);
+    EXPECT_CKR(
+        CKR_ARGUMENTS_BAD,
+        p11()->C_UnwrapKey(s_, nullptr, priv_, data, len, tmpl, std::size(tmpl), &obj)
+    ) << "no mechanism";
+    EXPECT_CKR(
+        CKR_ARGUMENTS_BAD,
+        p11()->C_UnwrapKey(s_, &oaep, priv_, data, len, tmpl, std::size(tmpl), nullptr)
+    ) << "no handle to return, before the mechanism";
+    EXPECT_CKR(
+        CKR_ARGUMENTS_BAD,
+        p11()->C_UnwrapKey(s_, &oaep, priv_, nullptr, len, tmpl, std::size(tmpl), &obj)
+    ) << "no wrapped key with a length";
+    EXPECT_CKR(
+        CKR_ARGUMENTS_BAD,
+        p11()->C_UnwrapKey(s_, &oaep, priv_, data, len, nullptr, std::size(tmpl), &obj)
+    ) << "no template with a count";
+    EXPECT_EQ(CK_INVALID_HANDLE, obj);
+    EXPECT_EQ(before, count_objects(s_));
 }
 
 TEST_F(unwrap, unwrapping_key_rules)
