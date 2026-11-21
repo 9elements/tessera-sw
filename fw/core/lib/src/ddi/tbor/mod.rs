@@ -56,6 +56,7 @@ pub mod part_init;
 pub mod policy;
 pub(crate) mod psk_change;
 pub(crate) mod pta;
+pub(crate) mod rsa_encrypt_decrypt;
 pub(crate) mod rsa_mod_exp;
 pub(crate) mod sd_backup;
 pub(crate) mod sd_create_peer_backup;
@@ -410,6 +411,11 @@ pub(crate) mod opcode {
     /// private key. See [`super::get_public_key`].
     pub(crate) const GET_PUBLIC_KEY: u8 = 0x2F;
 
+    /// `RsaEncryptDecrypt` — perform padded RSA encryption or decryption
+    /// with a caller-held masked private key. See
+    /// [`super::rsa_encrypt_decrypt`].
+    pub(crate) const RSA_ENCRYPT_DECRYPT: u8 = 0x34;
+
     /// `VerifyKey` — authenticate a masked key of any kind without using
     /// it. See [`super::verify_key`].
     pub(crate) const VERIFY_KEY: u8 = 0x32;
@@ -621,6 +627,7 @@ pub(crate) fn exchange_capacity(opcode: u8, request_len: usize, host_capacity: u
         opcode::ECC_VERIFY => types::TborEccVerifyResp::MAX_ENCODED_SIZE,
         opcode::ECDH_DERIVE => types::TborEcdhDeriveResp::MAX_ENCODED_SIZE,
         opcode::RSA_MOD_EXP => types::TborRsaModExpResp::MAX_ENCODED_SIZE,
+        opcode::RSA_ENCRYPT_DECRYPT => types::TborRsaEncryptDecryptResp::MAX_ENCODED_SIZE,
         opcode::HASH => types::TborHashResp::MAX_ENCODED_SIZE,
         opcode::HKDF_DERIVE => types::TborHkdfDeriveResp::MAX_ENCODED_SIZE,
         opcode::CONCAT_KDF_DERIVE => types::TborConcatKdfDeriveResp::MAX_ENCODED_SIZE,
@@ -796,6 +803,7 @@ pub(crate) async fn dispatch<'p, P: HsmPal>(
         opcode::ECC_GENERATE_KEY => ecc_generate_key::handle(pal, io, cmd_buf).await,
         opcode::ECDH_DERIVE => ecdh_derive::handle(pal, io, cmd_buf).await,
         opcode::RSA_MOD_EXP => rsa_mod_exp::handle(pal, io, cmd_buf).await,
+        opcode::RSA_ENCRYPT_DECRYPT => rsa_encrypt_decrypt::handle(pal, io, cmd_buf).await,
         opcode::HKDF_DERIVE => hkdf_derive::handle(pal, io, cmd_buf).await,
         opcode::CONCAT_KDF_DERIVE => concat_kdf_derive::handle(pal, io, cmd_buf).await,
         opcode::GET_CERT_CHAIN_INFO => get_cert_chain_info::handle(pal, io, cmd_buf).await,
@@ -860,6 +868,7 @@ fn is_known_opcode(opcode: u8) -> bool {
             | opcode::ECC_VERIFY
             | opcode::ECDH_DERIVE
             | opcode::RSA_MOD_EXP
+            | opcode::RSA_ENCRYPT_DECRYPT
             | opcode::HASH
             | opcode::HKDF_DERIVE
             | opcode::CONCAT_KDF_DERIVE
@@ -929,6 +938,7 @@ fn is_in_session(opcode: u8) -> bool {
         | opcode::ECC_VERIFY
         | opcode::ECDH_DERIVE
         | opcode::RSA_MOD_EXP
+        | opcode::RSA_ENCRYPT_DECRYPT
         | opcode::HASH
         | opcode::HKDF_DERIVE
         | opcode::CONCAT_KDF_DERIVE
@@ -1000,6 +1010,7 @@ fn needs_session_id_cross_check(opcode: u8) -> bool {
         | opcode::ECC_VERIFY
         | opcode::ECDH_DERIVE
         | opcode::RSA_MOD_EXP
+        | opcode::RSA_ENCRYPT_DECRYPT
         | opcode::HASH
         | opcode::HKDF_DERIVE
         | opcode::CONCAT_KDF_DERIVE
