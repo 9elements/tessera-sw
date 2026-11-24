@@ -169,11 +169,14 @@ inline CK_RV unwrap_key(
     );
 }
 
-/// The number of objects session `s` can see.
+/// The number of objects session `s` can see. A failed search fails the test
+/// instead of counting nothing.
 inline CK_ULONG count_objects(CK_SESSION_HANDLE s)
 {
     CK_ULONG total = 0;
-    if (p11()->C_FindObjectsInit(s, nullptr, 0) != CKR_OK)
+    CK_RV rv = p11()->C_FindObjectsInit(s, nullptr, 0);
+    EXPECT_CKR_OK(rv) << "a failed search counts nothing for the wrong reason";
+    if (rv != CKR_OK)
     {
         return 0;
     }
