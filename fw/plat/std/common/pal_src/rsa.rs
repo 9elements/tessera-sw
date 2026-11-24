@@ -58,15 +58,16 @@ impl StdHsmPal {
             return Err(HsmError::InvalidArg);
         }
         let pk = vault_priv_key(key_size, priv_key)?;
-        let k = key_size.modulus_len();
-        let Some(output) = out else {
-            return Ok(k);
-        };
-        let output = output.get_mut(..k).ok_or(HsmError::InvalidArg)?;
         self.rsa
-            .sign(&pk, hash, message_hash, salt_len, output)
-            .await?;
-        Ok(k)
+            .sign(
+                key_size,
+                hash,
+                &pk,
+                message_hash,
+                salt_len,
+                out.map(|buf| &mut **buf),
+            )
+            .await
     }
 
     pub(crate) async fn rsa_pair_pct(
@@ -1043,7 +1044,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_padded_rsa_inputs_are_rejected_without_writing_output() {
+    async fn invalid_rsa_inputs_are_rejected_without_writing_output() {
         let (pal, io) = pal_and_io();
         pal.alloc_scoped_async(&io, async |alloc| -> HsmResult<()> {
             let input = alloc.dma_alloc(0)?;
@@ -1068,6 +1069,25 @@ mod tests {
                         execute.then_some(&mut *output),
                     )
                     .await,
+                    pal.rsa_pkcs1_sign(
+                        &io,
+                        key,
+                        hash,
+                        input,
+                        input,
+                        execute.then_some(&mut *output),
+                    )
+                    .await,
+                    pal.rsa_pss_sign(
+                        &io,
+                        key,
+                        hash,
+                        input,
+                        input,
+                        32,
+                        execute.then_some(&mut *output),
+                    )
+                    .await,
                 ] {
                     assert_eq!(outcome, Err(HsmError::InvalidArg));
                 }
@@ -1077,7 +1097,7 @@ mod tests {
             Ok(())
         })
         .await
-        .expect("invalid padded RSA inputs");
+        .expect("invalid RSA inputs");
     }
 
     #[tokio::test]
@@ -1337,5 +1357,51 @@ mod tests {
         })
         .await
         .expect("RSA encrypt/decrypt");
+    }
+
+    #[tokio::test]
+    async fn rsa_sign_queries_validate_hash_and_pss_salt() {
+        let (pal, io) = pal_and_io();
+        let key = RsaPrivateKey::generate(256).expect("RSA key");
+        let mut key_bytes = vec![0; key.hsm_bytes_len()];
+        key.to_hsm_bytes(&mut key_bytes).expect("serialize RSA key");
+
+        pal.alloc_scoped_async(&io, async |alloc| -> HsmResult<()> {
+            let private = alloc.dma_alloc(key_bytes.len())?;
+            private.copy_from_slice(&key_bytes);
+            let digest = alloc.dma_alloc_zeroed(64)?;
+            let output = alloc.dma_alloc(256)?;
+
+            for execute in [false, true] {
+                assert_eq!(
+                    pal.rsa_pkcs1_sign(
+                        &io,
+                        HsmRsaKey::Rsa2048Priv,
+                        HsmHashAlgo::Sha3_256,
+                        private,
+                        &digest[..32],
+                        execute.then_some(&mut *output),
+                    )
+                    .await,
+                    Err(HsmError::UnsupportedDigestHashAlgorithm),
+                );
+                assert_eq!(
+                    pal.rsa_pss_sign(
+                        &io,
+                        HsmRsaKey::Rsa2048Priv,
+                        HsmHashAlgo::Sha256,
+                        private,
+                        &digest[..32],
+                        223,
+                        execute.then_some(&mut *output),
+                    )
+                    .await,
+                    Err(HsmError::InvalidArg),
+                );
+            }
+            Ok(())
+        })
+        .await
+        .expect("RSA signing query validation");
     }
 }
