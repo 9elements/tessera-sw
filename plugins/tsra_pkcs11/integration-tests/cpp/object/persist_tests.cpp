@@ -83,7 +83,7 @@ std::vector<CK_OBJECT_HANDLE> find_label(CK_SESSION_HANDLE s, const char *label)
     {
         out.assign(found, found + n);
     }
-    (void)p11()->C_FindObjectsFinal(s);
+    EXPECT_CKR_OK(p11()->C_FindObjectsFinal(s)) << "the search for " << label << " ends";
     return out;
 }
 

@@ -182,11 +182,14 @@ inline CK_ULONG count_objects(CK_SESSION_HANDLE s)
     }
     CK_OBJECT_HANDLE batch[64];
     CK_ULONG n = 0;
-    while ((p11()->C_FindObjects(s, batch, 64, &n) == CKR_OK) && (n > 0))
+    rv = p11()->C_FindObjects(s, batch, std::size(batch), &n);
+    while ((rv == CKR_OK) && (n > 0))
     {
         total += n;
+        rv = p11()->C_FindObjects(s, batch, std::size(batch), &n);
     }
-    (void)p11()->C_FindObjectsFinal(s);
+    EXPECT_CKR_OK(rv) << "a failed search counts only part of the objects";
+    EXPECT_CKR_OK(p11()->C_FindObjectsFinal(s)) << "the search ends";
     return total;
 }
 
