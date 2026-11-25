@@ -7,7 +7,10 @@
  * and C_SetAttributeValue policy (src/tsra_pkcs11_attr_policy.c), the AES
  * key-generation template check and build (src/tsra_pkcs11_template.c), the
  * unwrap and unwrapping key pair templates (src/tsra_pkcs11_unwrap_params.c),
- * and the derived-key templates, the ECDH peer point and the HKDF parameters
+ * the private-key unwrap template and the public key info it builds the two
+ * objects from (src/tsra_pkcs11_unwrap_private.c), the PSS and OAEP
+ * parameters (src/tsra_pkcs11_rsa_params.c), and the derived-key templates,
+ * the ECDH peer point and the HKDF parameters
  * (src/tsra_pkcs11_derive_params.c). The input becomes a template whose
  * values are slices of the input itself, so every ulValueLen is honest and a
  * finding is the module's, never caller UB. The same template doubles as the
@@ -18,23 +21,29 @@
  *       ../src/tsra_pkcs11_attr_policy.c ../src/tsra_pkcs11_template.c \
  *       ../src/tsra_pkcs11_ec_template.c \
  *       ../src/tsra_pkcs11_unwrap_params.c ../src/tsra_pkcs11_digest.c \
- *       ../src/tsra_pkcs11_derive_params.c \
+ *       ../src/tsra_pkcs11_derive_params.c ../src/tsra_pkcs11_unwrap_private.c \
+ *       ../src/tsra_pkcs11_rsa_params.c \
  *       -o template_fuzz && ./template_fuzz -max_total_time=60
  *
  * Besides the sanitizers it traps when the checks disagree: a template the
  * C_CreateObject policy, the keygen, unwrap or derive check accepts must also
  * pass the type table, a built keygen, unwrap or derive template never
  * outgrows its documented headroom, no template asks for both halves of the
- * unwrapping key pair at once (one wraps, the other unwraps), an accepted
- * peer point builds a SubjectPublicKeyInfo within EC_SPKI_DER_MAX, and
- * accepted HKDF parameters stay within the device's salt and info limits.
+ * unwrapping key pair at once (one wraps, the other unwraps), the two
+ * templates of an unwrapped private key stay within their headroom, an
+ * accepted peer point builds a SubjectPublicKeyInfo within EC_SPKI_DER_MAX,
+ * accepted HKDF parameters stay within the device's salt and info limits, and
+ * an accepted OAEP label is present exactly when it has a length.
  */
 
 #include "tsra_pkcs11_attr_policy.h"
 #include "tsra_pkcs11_derive_params.h"
+#include "tsra_pkcs11_rsa_params.h"
 #include "tsra_pkcs11_template.h"
 #include "tsra_pkcs11_unwrap_params.h"
+#include "tsra_pkcs11_unwrap_private.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -210,6 +219,35 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         __builtin_trap();
     }
 
+    /* A blob length up to 3060 bytes reaches every private-key window; the
+     * input stands in for the device's public key info. */
+    tsra_pkcs11_private_target pt;
+    if (tsra_pkcs11_unwrap_private_check(tmpl, count, (CK_ULONG)flags * 12u, &pt, NULL) == CKR_OK)
+    {
+        static tsra_pkcs11_private_fill pfill;
+        CK_ATTRIBUTE priv_full[TEMPLATE_MAX_ATTRS + UNWRAP_PRIV_APPENDED_ATTRS];
+        CK_ATTRIBUTE pub_full[UNWRAP_PUB_ATTRS];
+        CK_ULONG np = 0;
+        CK_ULONG nu = 0;
+        if ((shapes != CKR_OK) ||
+            ((tsra_pkcs11_unwrap_private_build(
+                  &pt,
+                  tmpl,
+                  count,
+                  data,
+                  size,
+                  &pfill,
+                  priv_full,
+                  &np,
+                  pub_full,
+                  &nu
+              ) == CKR_OK) &&
+             ((np > (count + UNWRAP_PRIV_APPENDED_ATTRS)) || (nu > UNWRAP_PUB_ATTRS))))
+        {
+            __builtin_trap();
+        }
+    }
+
     static tsra_pkcs11_derive_target derived;
     static const CK_MECHANISM_TYPE DERIVE[] = { CKM_ECDH1_DERIVE, CKM_HKDF_DERIVE };
     for (size_t m = 0; m < (sizeof(DERIVE) / sizeof(DERIVE[0])); m++)
@@ -279,6 +317,32 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if ((tsra_pkcs11_derive_params_check(&hkdf, &dp) == CKR_OK) &&
         ((dp.salt_len > HKDF_MAX_SALT_LEN) || (dp.info_len > HKDF_MAX_INFO_LEN) ||
          ((dp.salt == NULL) != (dp.salt_len == 0)) || ((dp.info == NULL) != (dp.info_len == 0))))
+    {
+        __builtin_trap();
+    }
+
+    /* The input as CK_RSA_PKCS_PSS_PARAMS and CK_RSA_PKCS_OAEP_PARAMS, the
+     * OAEP label a slice of it. */
+    CK_RSA_PKCS_PSS_PARAMS pss;
+    bool is_pss = false;
+    if (size >= sizeof(pss))
+    {
+        CK_MECHANISM m = { CKM_RSA_PKCS_PSS, (void *)data, sizeof(pss) };
+        if ((tsra_pkcs11_sign_params_check(&m, &pss, &is_pss) == CKR_OK) && !is_pss)
+        {
+            __builtin_trap();
+        }
+    }
+    CK_RSA_PKCS_OAEP_PARAMS op;
+    memset(&op, 0, sizeof(op));
+    op.hashAlg = PRFS[data[1] % (sizeof(PRFS) / sizeof(PRFS[0]))];
+    op.mgf = data[0] % (CKG_MGF1_SHA512 + 1);
+    op.source = ((flags & 1u) != 0) ? CKZ_DATA_SPECIFIED : 0;
+    op.pSourceData = ((flags & NULL_VALUE_BIT) != 0) ? NULL : (CK_BYTE_PTR)data;
+    op.ulSourceDataLen = (salt_len <= size) ? salt_len : size;
+    tsra_pkcs11_oaep_params oaep;
+    if ((tsra_pkcs11_oaep_params_check(&op, sizeof(op), &oaep) == CKR_OK) &&
+        ((oaep.label == NULL) != (oaep.label_len == 0)))
     {
         __builtin_trap();
     }

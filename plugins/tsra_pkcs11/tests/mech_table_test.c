@@ -182,6 +182,17 @@ static void test_sweep(void)
             ((ec->flags & CKF_EC_UNCOMPRESS) != 0),
         "an EC row names prime-field curves, by OID, with uncompressed points"
     );
+    const tsra_pkcs11_mech_t *pss = tsra_pkcs11_mech_find(CKM_SHA256_RSA_PKCS_PSS);
+    CHECK(
+        (pss != NULL) && (pss->min_key == RSA_MIN_KEY_BITS) && (pss->max_key == RSA_MAX_KEY_BITS) &&
+            ((pss->flags & EC_MECH_FLAGS) == 0),
+        "an RSA row takes the unwrapped key sizes, 2048 to 4096 bits, and has no EC flags"
+    );
+    const tsra_pkcs11_mech_t *oaep = tsra_pkcs11_mech_find(CKM_RSA_PKCS_OAEP);
+    CHECK(
+        (oaep != NULL) && (oaep->flags == (CKF_ENCRYPT | CKF_DECRYPT)),
+        "CKM_RSA_PKCS_OAEP encrypts and decrypts, and wraps nothing"
+    );
     const tsra_pkcs11_mech_t *aes = tsra_pkcs11_mech_find(CKM_AES_CBC);
     CHECK((aes != NULL) && ((aes->flags & EC_MECH_FLAGS) == 0), "an AES row has no EC flags");
 }

@@ -90,6 +90,9 @@ set(SOURCE
     unwrap/unwrap_tests.cpp
     unwrap/kat_tests.cpp
     derive/derive_tests.cpp
+    unwrap/private_tests.cpp
+    rsa/sign_tests.cpp
+    rsa/oaep_tests.cpp
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -99,6 +102,8 @@ set(WYCHEPROOF_INC
     ${WYCHEPROOF_OUT}/aes_cbc_pkcs5.inc
     ${WYCHEPROOF_OUT}/aes_gcm.inc
     ${WYCHEPROOF_OUT}/ecdh_ecpoint.inc
+    ${WYCHEPROOF_OUT}/ecdh_shared.inc
+    ${WYCHEPROOF_OUT}/rsa_oaep.inc
 )
 add_custom_command(
     OUTPUT ${WYCHEPROOF_INC}
@@ -112,6 +117,11 @@ add_custom_command(
         ${WYCHEPROOF_VECTORS}/ecdh_secp256r1_ecpoint_test.json
         ${WYCHEPROOF_VECTORS}/ecdh_secp384r1_ecpoint_test.json
         ${WYCHEPROOF_VECTORS}/ecdh_secp521r1_ecpoint_test.json
+        ${WYCHEPROOF_VECTORS}/rsa_oaep_2048_sha256_mgf1sha256_test.json
+        ${WYCHEPROOF_VECTORS}/rsa_oaep_2048_sha384_mgf1sha384_test.json
+        ${WYCHEPROOF_VECTORS}/rsa_oaep_2048_sha512_mgf1sha512_test.json
+        ${WYCHEPROOF_VECTORS}/rsa_oaep_3072_sha256_mgf1sha256_test.json
+        ${WYCHEPROOF_VECTORS}/rsa_oaep_4096_sha256_mgf1sha256_test.json
     COMMENT "Converting the Wycheproof vectors"
     VERBATIM
 )

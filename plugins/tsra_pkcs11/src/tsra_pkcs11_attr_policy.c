@@ -245,12 +245,16 @@ static bool fixed_secret_type(CK_KEY_TYPE kt)
 /*
  * Whether `type` is a usage the device fixed when it made the key: an EC
  * private key signs or derives and its public half verifies or derives
- * (CKA_SIGN, CKA_VERIFY, CKA_DERIVE), and a derived generic secret or HMAC
- * key keeps the usages it was derived with (every usage flag). The masked key
- * keeps that usage, so these attributes are read-only on such a key where
- * PKCS#11 lets them change (a deviation in the README); turning one on would
- * only fail later, at the operation. AES keys keep their modifiable flags:
- * the device AES key has both directions and the module enforces the flags.
+ * (CKA_SIGN, CKA_VERIFY, CKA_DERIVE), an RSA key pair has one use, so every
+ * usage its class defines is fixed, and a derived generic secret or HMAC key
+ * keeps the usages it was derived with (every usage flag). The rule covers
+ * public keys made with C_CreateObject too, as for EC. The masked key keeps
+ * that usage, so these attributes are read-only on such a key where PKCS#11
+ * lets them change (a deviation in the README); turning one on would only
+ * fail later, at the operation. AES keys keep their modifiable flags: the
+ * device AES key has both directions and the module enforces the flags. So do
+ * CKA_WRAP and CKA_UNWRAP of the partition's unwrapping key pair, the one
+ * local RSA key: the module enforces those itself.
  */
 static CK_RV fixed_usage(
     tsra_pkcs11_attr_reader read,
@@ -261,13 +265,16 @@ static CK_RV fixed_usage(
 )
 {
     *out = CK_FALSE;
-    bool ec_usage = ((cls & (P11_CLS_PUBLIC | P11_CLS_PRIVATE)) != 0) &&
-                    ((type == CKA_SIGN) || (type == CKA_VERIFY) || (type == CKA_DERIVE));
-    bool secret_usage = ((cls & P11_CLS_SECRET) != 0) &&
-                        ((type == CKA_ENCRYPT) || (type == CKA_DECRYPT) || (type == CKA_WRAP) ||
-                         (type == CKA_UNWRAP) || (type == CKA_SIGN) || (type == CKA_VERIFY) ||
-                         (type == CKA_DERIVE));
-    if (!ec_usage && !secret_usage)
+    bool pair = (cls & (P11_CLS_PUBLIC | P11_CLS_PRIVATE)) != 0;
+    bool ec_usage = pair && ((type == CKA_SIGN) || (type == CKA_VERIFY) || (type == CKA_DERIVE));
+    bool any_usage = (type == CKA_ENCRYPT) || (type == CKA_DECRYPT) || (type == CKA_WRAP) ||
+                     (type == CKA_UNWRAP) || (type == CKA_SIGN) || (type == CKA_VERIFY) ||
+                     (type == CKA_DERIVE);
+    bool rsa_usage = pair &&
+                     (any_usage || (type == CKA_SIGN_RECOVER) || (type == CKA_VERIFY_RECOVER)) &&
+                     (find_rule(type, cls) != NULL);
+    bool secret_usage = ((cls & P11_CLS_SECRET) != 0) && any_usage;
+    if (!ec_usage && !rsa_usage && !secret_usage)
     {
         return CKR_OK;
     }
@@ -287,7 +294,18 @@ static CK_RV fixed_usage(
     {
         return rv;
     }
-    bool fixed = ec_usage ? (kt == CKK_EC) : fixed_secret_type(kt);
+    bool fixed = secret_usage ? fixed_secret_type(kt) : (ec_usage && (kt == CKK_EC));
+    if (!fixed && rsa_usage && (kt == CKK_RSA) && (a.ulValueLen == sizeof(kt)))
+    {
+        CK_BBOOL local = CK_FALSE;
+        rv = read_bool(read, ctx, CKA_LOCAL, CK_FALSE, CK_FALSE, &local);
+        if (rv != CKR_OK)
+        {
+            return rv;
+        }
+        /* The unwrapping key's own flags stay the caller's to turn off. */
+        fixed = !local || ((type != CKA_UNWRAP) && (type != CKA_WRAP));
+    }
     *out = ((a.ulValueLen != sizeof(kt)) || fixed) ? CK_TRUE : CK_FALSE;
     return CKR_OK;
 }

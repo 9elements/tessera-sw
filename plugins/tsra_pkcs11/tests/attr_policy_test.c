@@ -16,7 +16,8 @@
  * CKA_MODIFIABLE gates and their order (and C_DestroyObject's with
  * CKA_DESTROYABLE), every class's modifiable and fixed attributes, the three
  * latches (including an absent or malformed stored value), the usage flags
- * the device fixes on EC, derived generic secret and HMAC keys, value-shape
+ * the device fixes on EC, RSA, derived generic secret and HMAC keys (but
+ * CKA_WRAP and CKA_UNWRAP of the unwrapping key pair), value-shape
  * rejects, duplicates, the TYPE_INVALID vs READ_ONLY split for unlisted types,
  * and first-failure-wins ordering; and for C_CreateObject the ceilings, the
  * class rows (no class, key classes with and without key material), the
@@ -535,7 +536,10 @@ static void test_ec_usage(void)
     static CK_KEY_TYPE rsa = CKK_RSA;
     const CK_ATTRIBUTE ec_priv[] = { ATTR(CKA_CLASS, g_private), ATTR(CKA_KEY_TYPE, ec) };
     const CK_ATTRIBUTE ec_pub[] = { ATTR(CKA_CLASS, g_public), ATTR(CKA_KEY_TYPE, ec) };
-    const CK_ATTRIBUTE rsa_priv[] = { ATTR(CKA_CLASS, g_private), ATTR(CKA_KEY_TYPE, rsa) };
+    /* The partition's unwrapping key, the one local RSA key. */
+    const CK_ATTRIBUTE rsa_priv[] = { ATTR(CKA_CLASS, g_private),
+                                      ATTR(CKA_KEY_TYPE, rsa),
+                                      BOOL_ATTR(CKA_LOCAL, g_true) };
     /* A key type one byte wide, as an edited file store could hold. */
     const CK_ATTRIBUTE odd_priv[] = { ATTR(CKA_CLASS, g_private), ATTR(CKA_KEY_TYPE, g_true) };
     CHECK(
@@ -568,13 +572,112 @@ static void test_ec_usage(void)
         "EC private key: CKA_LABEL still changes"
     );
     CHECK(
-        check_on(rsa_priv, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN, g_true)) == CKR_OK,
-        "RSA private key: CKA_SIGN keeps the PKCS#11 rule"
+        check_on(rsa_priv, COUNT(rsa_priv), CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_UNWRAP, g_true)) ==
+            CKR_OK,
+        "the local RSA private key: CKA_UNWRAP keeps the PKCS#11 rule"
     );
     CHECK(
         check_on(odd_priv, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN, g_true)) ==
             CKR_ATTRIBUTE_READ_ONLY,
         "a key type that is not a CK_KEY_TYPE -> READ_ONLY (restrictive)"
+    );
+}
+
+/* RSA keys arrive by unwrap with one use the device fixes; the partition's
+ * unwrapping key, the one local RSA key, keeps the PKCS#11 rule. */
+static void test_rsa_usage(void)
+{
+    printf("== RSA keys: the usage the device fixed ==\n");
+    static CK_KEY_TYPE rsa = CKK_RSA;
+    static const CK_ATTRIBUTE_TYPE priv_usages[] = { CKA_SIGN,
+                                                     CKA_DECRYPT,
+                                                     CKA_SIGN_RECOVER,
+                                                     CKA_UNWRAP,
+                                                     CKA_DERIVE };
+    static const CK_ATTRIBUTE_TYPE pub_usages[] = { CKA_VERIFY,
+                                                    CKA_ENCRYPT,
+                                                    CKA_VERIFY_RECOVER,
+                                                    CKA_WRAP,
+                                                    CKA_DERIVE };
+    const CK_ATTRIBUTE priv[] = { ATTR(CKA_CLASS, g_private),
+                                  ATTR(CKA_KEY_TYPE, rsa),
+                                  BOOL_ATTR(CKA_LOCAL, g_false) };
+    const CK_ATTRIBUTE pub[] = { ATTR(CKA_CLASS, g_public),
+                                 ATTR(CKA_KEY_TYPE, rsa),
+                                 BOOL_ATTR(CKA_LOCAL, g_false) };
+    const CK_ATTRIBUTE no_local[] = { ATTR(CKA_CLASS, g_private), ATTR(CKA_KEY_TYPE, rsa) };
+    const CK_ATTRIBUTE wide_local[] = { ATTR(CKA_CLASS, g_private),
+                                        ATTR(CKA_KEY_TYPE, rsa),
+                                        ATTR(CKA_LOCAL, g_wide) };
+    const CK_ATTRIBUTE unwrapping[] = { ATTR(CKA_CLASS, g_private),
+                                        ATTR(CKA_KEY_TYPE, rsa),
+                                        BOOL_ATTR(CKA_LOCAL, g_true),
+                                        BOOL_ATTR(CKA_UNWRAP, g_true) };
+    bool all = true;
+    for (size_t u = 0; u < COUNT(priv_usages); u++)
+    {
+        for (int on = 0; on < 2; on++)
+        {
+            CK_BBOOL *v = (on != 0) ? &g_true : &g_false;
+            CK_ATTRIBUTE a = { priv_usages[u], v, sizeof(*v) };
+            all = all && (check_on(priv, COUNT(priv), CK_TRUE, a) == CKR_ATTRIBUTE_READ_ONLY) &&
+                  (check_on(no_local, COUNT(no_local), CK_TRUE, a) == CKR_ATTRIBUTE_READ_ONLY) &&
+                  (check_on(wide_local, COUNT(wide_local), CK_TRUE, a) == CKR_ATTRIBUTE_READ_ONLY);
+            CK_ATTRIBUTE b = { pub_usages[u], v, sizeof(*v) };
+            all = all && (check_on(pub, COUNT(pub), CK_TRUE, b) == CKR_ATTRIBUTE_READ_ONLY);
+        }
+    }
+    CHECK(
+        all,
+        "unwrapped RSA keys: every usage of the class, on or off, with CKA_LOCAL FALSE, absent "
+        "or malformed -> READ_ONLY"
+    );
+    CHECK(
+        check_on(priv, COUNT(priv), CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_ENCRYPT, g_true)) ==
+            CKR_ATTRIBUTE_TYPE_INVALID,
+        "unwrapped RSA private key: a public usage it does not carry -> TYPE_INVALID"
+    );
+    CHECK(
+        check_on(priv, COUNT(priv), CK_TRUE, (CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label)) == CKR_OK,
+        "unwrapped RSA private key: CKA_LABEL still changes"
+    );
+    CHECK(
+        check_on(
+            unwrapping,
+            COUNT(unwrapping),
+            CK_TRUE,
+            (CK_ATTRIBUTE)BOOL_ATTR(CKA_UNWRAP, g_false)
+        ) == CKR_OK,
+        "the unwrapping key: CKA_UNWRAP may turn off, the module enforces it"
+    );
+    const CK_ATTRIBUTE wrapping[] = { ATTR(CKA_CLASS, g_public),
+                                      ATTR(CKA_KEY_TYPE, rsa),
+                                      BOOL_ATTR(CKA_LOCAL, g_true),
+                                      BOOL_ATTR(CKA_WRAP, g_true) };
+    CHECK(
+        check_on(wrapping, COUNT(wrapping), CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_WRAP, g_false)) ==
+            CKR_OK,
+        "the unwrapping key's public half: CKA_WRAP may turn off"
+    );
+    CHECK(
+        (check_on(
+             unwrapping,
+             COUNT(unwrapping),
+             CK_TRUE,
+             (CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN, g_true)
+         ) == CKR_ATTRIBUTE_READ_ONLY) &&
+            (check_on(
+                 wrapping,
+                 COUNT(wrapping),
+                 CK_TRUE,
+                 (CK_ATTRIBUTE)BOOL_ATTR(CKA_ENCRYPT, g_true)
+             ) == CKR_ATTRIBUTE_READ_ONLY),
+        "the unwrapping key: every other usage -> READ_ONLY"
+    );
+    CHECK(
+        check_on(pub, COUNT(pub) - 1, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_VERIFY, g_true)) ==
+            CKR_ATTRIBUTE_READ_ONLY,
+        "an RSA public key without CKA_LOCAL, as C_CreateObject makes one -> READ_ONLY"
     );
 }
 
@@ -1174,6 +1277,7 @@ int main(void)
     test_latches();
     test_other_classes();
     test_ec_usage();
+    test_rsa_usage();
     test_derived_usage();
     test_shapes_and_order();
     test_create();

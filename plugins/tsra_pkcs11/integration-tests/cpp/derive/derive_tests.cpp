@@ -12,13 +12,19 @@
 /// positive control and no object left; the checks that come first
 /// (initialized, session, arguments, login); the base key rules; survival
 /// across a relogin and the end of a session; the Wycheproof ECDH points the
-/// token must refuse; the leak gate; and that the file store never sees a
-/// derived value. The full verdict matrix is in tests/derive_params_test.c.
+/// token must refuse, and every valid Wycheproof vector on a base key
+/// unwrapped from its private scalar; the leak gate; and that the file store
+/// never sees a derived value. The full verdict matrix is in
+/// tests/derive_params_test.c.
 
+#include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <iterator>
+#include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -34,6 +40,7 @@
 #include "utils/unwrap_helpers.hpp"
 #include "vectors/vectors.hpp"
 #include "wycheproof/ecdh_ecpoint.inc"
+#include "wycheproof/ecdh_shared.inc"
 
 namespace
 {
@@ -963,6 +970,92 @@ TEST_F(derive, wycheproof_points_the_token_must_refuse)
         EXPECT_NE(0u, refused[c]) << ec_curves()[c].name << ": the set refuses something";
         EXPECT_NE(0u, taken[c]) << ec_curves()[c].name << ": its control is taken";
     }
+}
+
+TEST_F(derive, wycheproof_shared_secrets_match_in_device_byte_order)
+{
+    // Each valid vector names its private scalar, so its base key reaches the
+    // token by unwrap; the secret never leaves the device, so HKDF and AES-CBC
+    // on both sides compare it, as in the chain test above.
+    const char *persist = std::getenv("TSRA_PKCS11_PERSIST");
+    if ((persist != nullptr) && (std::string_view(persist) == "1"))
+    {
+        GTEST_SKIP() << "session objects only: the memory-store run covers it";
+    }
+    ASSERT_FALSE(std::empty(vectors::kWycheproofEcdhShared));
+    CK_OBJECT_HANDLE wrap_pub = CK_INVALID_HANDLE;
+    CK_OBJECT_HANDLE wrap_priv = CK_INVALID_HANDLE;
+    ASSERT_CKR_OK(gen_unwrapping_pair(s_, &wrap_pub, &wrap_priv));
+    std::vector<CK_BYTE> n;
+    std::vector<CK_BYTE> e;
+    ASSERT_CKR_OK(get_bytes(s_, wrap_pub, CKA_MODULUS, n));
+    ASSERT_CKR_OK(get_bytes(s_, wrap_pub, CKA_PUBLIC_EXPONENT, e));
+    host::Pkey wrapping = host::rsa_public(n, e);
+    CK_OBJECT_CLASS private_key = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE ec = CKK_EC;
+    std::vector<CK_ATTRIBUTE> base_template = {
+        { CKA_CLASS, &private_key, sizeof(private_key) },
+        { CKA_KEY_TYPE, &ec, sizeof(ec) },
+        { CKA_DERIVE, &g_yes, sizeof(g_yes) },
+    };
+    RsaAesMechanism wrap;
+    std::map<std::string, CK_OBJECT_HANDLE> bases;
+    size_t matched = 0;
+    size_t x_zero = 0;
+    for (const vectors::WycheproofEcdh &v : vectors::kWycheproofEcdhShared)
+    {
+        SCOPED_TRACE(std::string(v.curve) + " tcId " + std::to_string(v.tc_id));
+        CK_OBJECT_HANDLE &base = bases[std::string(v.curve) + v.priv];
+        if (base == CK_INVALID_HANDLE)
+        {
+            host::Pkey key = host::ec_private(v.curve, vectors::hex(v.priv));
+            host::Bytes blob =
+                host::rsa_aes_key_wrap(wrapping.get(), "SHA256", host::pkcs8(key.get()));
+            ASSERT_CKR_OK(p11()->C_UnwrapKey(
+                s_,
+                &wrap.mech,
+                wrap_priv,
+                blob.data(),
+                static_cast<CK_ULONG>(blob.size()),
+                base_template.data(),
+                static_cast<CK_ULONG>(base_template.size()),
+                &base
+            ));
+        }
+        host::Bytes pub = vectors::hex(v.pub);
+        CK_OBJECT_HANDLE secret = CK_INVALID_HANDLE;
+        // The device refuses a peer point whose x-coordinate is 0, a point on
+        // the curve, with a generic command failure (a README deviation).
+        size_t coord = (pub.size() - 1) / 2;
+        if (std::all_of(pub.begin() + 1, pub.begin() + 1 + coord, [](CK_BYTE b) { return b == 0; }))
+        {
+            EXPECT_CKR(CKR_FUNCTION_FAILED, ecdh(s_, base, pub, &secret))
+                << "until the device takes a peer point with x = 0";
+            EXPECT_EQ(CK_INVALID_HANDLE, secret);
+            x_zero++;
+            continue;
+        }
+        ASSERT_CKR_OK(ecdh(s_, base, pub, &secret));
+        CK_OBJECT_HANDLE key = CK_INVALID_HANDLE;
+        ASSERT_NO_FATAL_FAILURE(aes_from(secret, AES256_KEY_BYTES, &key));
+        host::Bytes k = host::hkdf(
+            "SHA256",
+            device_ikm(vectors::hex(v.shared)),
+            kSalt,
+            kInfo,
+            AES256_KEY_BYTES
+        );
+        std::vector<CK_BYTE> ct = cbc_on_token(s_, key);
+        ASSERT_FALSE(ct.empty());
+        host::Bytes want = cbc_on_host(k);
+        EXPECT_EQ(want, ct) << "Wycheproof's secret, HKDF over it in the device's byte order";
+        matched += (want == ct) ? 1 : 0;
+        ASSERT_CKR_OK(p11()->C_DestroyObject(s_, key));
+        ASSERT_CKR_OK(p11()->C_DestroyObject(s_, secret));
+    }
+    EXPECT_NE(0u, x_zero) << "the set has its x = 0 points";
+    EXPECT_EQ(std::size(vectors::kWycheproofEcdhShared), matched + x_zero)
+        << "every other vector matches";
 }
 
 // ---------------------------------------------------------------------------

@@ -201,6 +201,16 @@ CK_ULONG tsra_pkcs11_ec_curve_bits(tsra_pkcs11_ec_curve_t curve)
     return (c != NULL) ? c->bits : 0;
 }
 
+const CK_BYTE *tsra_pkcs11_ec_curve_params(tsra_pkcs11_ec_curve_t curve, CK_ULONG *len)
+{
+    const curve_info *c = find_curve(curve);
+    if (len != NULL)
+    {
+        *len = (c != NULL) ? c->oid_len : 0;
+    }
+    return (c != NULL) ? c->oid : NULL;
+}
+
 /*
  * Write the DER header of an element of `tag` with `len` content bytes at `p`
  * and return its length. Every length here is below 256 (EC_SPKI_DER_MAX), so

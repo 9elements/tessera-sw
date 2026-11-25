@@ -59,12 +59,24 @@ static const tsra_pkcs11_cipher_mech CIPHER_MECHS[] = {
     { CKM_AES_CBC_PAD, TSRA_PKCS11_KIND_AES, CKK_AES },
     { CKM_AES_GCM, TSRA_PKCS11_KIND_AES_GCM, CKK_AES },
     { CKM_AES_XTS, TSRA_PKCS11_KIND_AES_XTS, CKK_AES_XTS },
+    { CKM_RSA_PKCS_OAEP, TSRA_PKCS11_KIND_RSA, CKK_RSA },
 };
 
 static const tsra_pkcs11_sign_mech SIGN_MECHS[] = {
-    { CKM_ECDSA, CKK_EC, false },       { CKM_ECDSA_SHA1, CKK_EC, true },
-    { CKM_ECDSA_SHA256, CKK_EC, true }, { CKM_ECDSA_SHA384, CKK_EC, true },
+    { CKM_ECDSA, CKK_EC, false },
+    { CKM_ECDSA_SHA1, CKK_EC, true },
+    { CKM_ECDSA_SHA256, CKK_EC, true },
+    { CKM_ECDSA_SHA384, CKK_EC, true },
     { CKM_ECDSA_SHA512, CKK_EC, true },
+    { CKM_SHA1_RSA_PKCS, CKK_RSA, true },
+    { CKM_SHA256_RSA_PKCS, CKK_RSA, true },
+    { CKM_SHA384_RSA_PKCS, CKK_RSA, true },
+    { CKM_SHA512_RSA_PKCS, CKK_RSA, true },
+    { CKM_RSA_PKCS_PSS, CKK_RSA, false },
+    { CKM_SHA1_RSA_PKCS_PSS, CKK_RSA, true },
+    { CKM_SHA256_RSA_PKCS_PSS, CKK_RSA, true },
+    { CKM_SHA384_RSA_PKCS_PSS, CKK_RSA, true },
+    { CKM_SHA512_RSA_PKCS_PSS, CKK_RSA, true },
 };
 
 const CK_ATTRIBUTE *tsra_pkcs11_tmpl_find(

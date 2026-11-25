@@ -17,13 +17,14 @@
 #include "utils/aes_helpers.hpp"
 #include "utils/ec_helpers.hpp"
 #include "utils/module.hpp"
+#include "utils/rsa_helpers.hpp"
 #include "utils/unwrap_helpers.hpp"
 
 class smoke : public PublicSession
 {
 };
 
-class smoke_login : public UserSession
+class smoke_login : public PrivateUnwrapSession
 {
 };
 
@@ -159,6 +160,12 @@ TEST_F(smoke_login, every_advertised_mechanism_has_an_init_path)
     ASSERT_CKR_OK(gen_xts_key(s_, "init-xts", &xts));
     CK_OBJECT_HANDLE ec_pub = 0, ec_priv = 0;
     ASSERT_CKR_OK(gen_p256(s_, &ec_pub, &ec_priv));
+    UnwrappedPair rsa_sign;
+    UnwrappedPair rsa_decrypt;
+    ASSERT_NO_FATAL_FAILURE(unwrap_pair(host_rsa(2048), CKK_RSA, CKA_SIGN, &rsa_sign));
+    ASSERT_NO_FATAL_FAILURE(unwrap_pair(host_rsa(2048), CKK_RSA, CKA_DECRYPT, &rsa_decrypt));
+    CK_RSA_PKCS_PSS_PARAMS pss = { CKM_SHA256, CKG_MGF1_SHA256, 32 };
+    OaepMechanism oaep;
     CK_BYTE iv[kAesBlock] = { 0 };
     CK_GCM_PARAMS gcm_params{};
     gcm_params.pIv = iv;
@@ -255,6 +262,27 @@ TEST_F(smoke_login, every_advertised_mechanism_has_an_init_path)
                 priv = ec_priv;
                 pub = ec_pub;
                 break;
+            case CKM_SHA1_RSA_PKCS:
+            case CKM_SHA256_RSA_PKCS:
+            case CKM_SHA384_RSA_PKCS:
+            case CKM_SHA512_RSA_PKCS:
+                priv = rsa_sign.priv;
+                pub = rsa_sign.pub;
+                break;
+            case CKM_RSA_PKCS_PSS:
+            case CKM_SHA1_RSA_PKCS_PSS:
+            case CKM_SHA256_RSA_PKCS_PSS:
+            case CKM_SHA384_RSA_PKCS_PSS:
+            case CKM_SHA512_RSA_PKCS_PSS:
+                pss.hashAlg = (m == CKM_SHA1_RSA_PKCS_PSS)     ? CKM_SHA_1
+                              : (m == CKM_SHA384_RSA_PKCS_PSS) ? CKM_SHA384
+                              : (m == CKM_SHA512_RSA_PKCS_PSS) ? CKM_SHA512
+                                                               : CKM_SHA256;
+                pss.mgf = mgf1_of(pss.hashAlg);
+                mech = { m, &pss, sizeof(pss) };
+                priv = rsa_sign.priv;
+                pub = rsa_sign.pub;
+                break;
             default:
                 ADD_FAILURE() << "no key for this sign mechanism";
                 continue;
@@ -283,13 +311,24 @@ TEST_F(smoke_login, every_advertised_mechanism_has_an_init_path)
                 key = xts;
                 break;
             default:
+                break; /* CKM_RSA_PKCS_OAEP below, any other a failure */
+            }
+            CK_OBJECT_HANDLE decrypt_key = key;
+            if (m == CKM_RSA_PKCS_OAEP)
+            {
+                mech = oaep.mech;
+                key = rsa_decrypt.pub;
+                decrypt_key = rsa_decrypt.priv;
+            }
+            else if (key == 0)
+            {
                 ADD_FAILURE() << "no key and parameter for this cipher mechanism";
                 continue;
             }
             EXPECT_CKR_OK(p11()->C_EncryptInit(s_, &mech, key));
             EXPECT_CKR_OK(p11()->C_EncryptInit(s_, nullptr, key));
-            EXPECT_CKR_OK(p11()->C_DecryptInit(s_, &mech, key));
-            EXPECT_CKR_OK(p11()->C_DecryptInit(s_, nullptr, key));
+            EXPECT_CKR_OK(p11()->C_DecryptInit(s_, &mech, decrypt_key));
+            EXPECT_CKR_OK(p11()->C_DecryptInit(s_, nullptr, decrypt_key));
         }
         if ((info.flags & CKF_DERIVE) != 0)
         {

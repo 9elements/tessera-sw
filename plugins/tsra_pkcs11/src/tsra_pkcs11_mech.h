@@ -33,7 +33,7 @@ typedef struct
 
 /* Rows in tsra_pkcs11_mechs; a piece that implements a mechanism appends its
  * row and raises this (checked at compile time). */
-#define TSRA_PKCS11_MECH_COUNT 20
+#define TSRA_PKCS11_MECH_COUNT 30
 
 extern const tsra_pkcs11_mech_t tsra_pkcs11_mechs[];
 

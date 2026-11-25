@@ -81,6 +81,10 @@ CK_ULONG tsra_pkcs11_ec_coord_len(tsra_pkcs11_ec_curve_t curve);
  * its ECDH shared secret; 0 for any other value. */
 CK_ULONG tsra_pkcs11_ec_curve_bits(tsra_pkcs11_ec_curve_t curve);
 
+/* The CKA_EC_PARAMS value of `curve`, its DER named-curve OID, with its length
+ * in *len; NULL (and *len 0) for any other value. The bytes are static. */
+const CK_BYTE *tsra_pkcs11_ec_curve_params(tsra_pkcs11_ec_curve_t curve, CK_ULONG *len);
+
 /*
  * The DER SubjectPublicKeyInfo (RFC 5480) of the public key whose uncompressed
  * point on `curve` is `point`: the form the SDK takes an ECDH peer in. `out`

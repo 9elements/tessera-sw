@@ -178,12 +178,24 @@ and the result of the last hardware run.
   changed it, and those tests and the README deviation change with it).
 - Result: not run yet.
 
-### H-l RSA decryption timing
+### H-l RSA keys: unwrap of each size, decryption timing
 
-- Run: time RSA decryption of valid and invalid PKCS#1 v1.5 and OAEP
-  ciphertexts (Bleichenbacher, Manger), and `C_UnwrapKey` with blobs that fail
-  in the OAEP block and in the key wrap. Optional before general availability.
-- Expect: no timing difference an attacker can use.
+- Run: `C_UnwrapKey` of a host RSA key of 2048, 3072 and 4096 bits and of an
+  EC key on each curve, as a signing and as a decrypting or deriving key; sign
+  and verify with every RSA mechanism, OAEP both ways, and the Wycheproof OAEP
+  and ECDH vectors. Then time `CKM_RSA_PKCS_OAEP` decryption of valid and
+  invalid ciphertexts (Manger: a bad leading byte, a bad label, a bad
+  padding), and `C_UnwrapKey` with blobs that fail in the OAEP block and in
+  the key wrap. The timing part is optional before general availability.
+- Expect: every size and curve unwraps with the blob lengths the README
+  names, the firmware's import self-test passes, the RSA private key is the
+  CRT kind, and the results match the emulator and the host (PKCS#1 v1.5
+  bit-exact). A peer point with x = 0 is refused as on the simulator, or the
+  README deviation goes. No timing difference an attacker can use: the module
+  answers every failed decryption alike, but the SDK removes the padding on
+  the host, so the time it takes is the device's and the SDK's.
+- Cases: `private_unwrap.*`, `rsa_sign.*`, `rsa_oaep.*`,
+  `derive.wycheproof_shared_secrets_match_in_device_byte_order`.
 - Result: not run yet.
 
 ### H-m External tools
