@@ -15,7 +15,8 @@
  * Covers the argument and handle checks, the read-only-session and
  * CKA_MODIFIABLE gates and their order (and C_DestroyObject's with
  * CKA_DESTROYABLE), every class's modifiable and fixed attributes, the three
- * latches (including an absent or malformed stored value), value-shape
+ * latches (including an absent or malformed stored value), the usage flags
+ * the device fixes on EC, derived generic secret and HMAC keys, value-shape
  * rejects, duplicates, the TYPE_INVALID vs READ_ONLY split for unlisted types,
  * and first-failure-wins ordering; and for C_CreateObject the ceilings, the
  * class rows (no class, key classes with and without key material), the
@@ -26,6 +27,7 @@
 
 #include "tsra_pkcs11_attr_policy.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -573,6 +575,47 @@ static void test_ec_usage(void)
         check_on(odd_priv, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN, g_true)) ==
             CKR_ATTRIBUTE_READ_ONLY,
         "a key type that is not a CK_KEY_TYPE -> READ_ONLY (restrictive)"
+    );
+}
+
+/* The key types only C_DeriveKey makes: their device keys fix every usage. */
+static void test_derived_usage(void)
+{
+    printf("== derived generic secret and HMAC keys: the usage the device fixed ==\n");
+    static CK_KEY_TYPE generic = CKK_GENERIC_SECRET;
+    static CK_KEY_TYPE hmac[] = { CKK_SHA256_HMAC, CKK_SHA384_HMAC, CKK_SHA512_HMAC };
+    static const CK_ATTRIBUTE_TYPE usages[] = { CKA_ENCRYPT, CKA_DECRYPT, CKA_WRAP,  CKA_UNWRAP,
+                                                CKA_SIGN,    CKA_VERIFY,  CKA_DERIVE };
+    const CK_ATTRIBUTE secret[] = { ATTR(CKA_CLASS, g_secret), ATTR(CKA_KEY_TYPE, generic) };
+    bool all = true;
+    for (size_t u = 0; u < COUNT(usages); u++)
+    {
+        all = all && (check_on(secret, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(usages[u], g_true)) ==
+                      CKR_ATTRIBUTE_READ_ONLY);
+        all = all && (check_on(secret, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(usages[u], g_false)) ==
+                      CKR_ATTRIBUTE_READ_ONLY);
+        for (size_t h = 0; h < COUNT(hmac); h++)
+        {
+            const CK_ATTRIBUTE key[] = { ATTR(CKA_CLASS, g_secret), ATTR(CKA_KEY_TYPE, hmac[h]) };
+            all = all && (check_on(key, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(usages[u], g_true)) ==
+                          CKR_ATTRIBUTE_READ_ONLY);
+        }
+    }
+    CHECK(all, "generic secret and HMAC keys: every usage flag, on or off -> READ_ONLY");
+    CHECK(
+        check_on(secret, 2, CK_TRUE, (CK_ATTRIBUTE)ATTR(CKA_LABEL, g_label)) == CKR_OK,
+        "generic secret: CKA_LABEL still changes"
+    );
+    CHECK(
+        (on_key((CK_ATTRIBUTE)BOOL_ATTR(CKA_ENCRYPT, g_false)) == CKR_OK) &&
+            (on_key((CK_ATTRIBUTE)BOOL_ATTR(CKA_SIGN, g_true)) == CKR_OK),
+        "AES key: its usage flags keep the PKCS#11 rule"
+    );
+    const CK_ATTRIBUTE odd[] = { ATTR(CKA_CLASS, g_secret), ATTR(CKA_KEY_TYPE, g_true) };
+    CHECK(
+        check_on(odd, 2, CK_TRUE, (CK_ATTRIBUTE)BOOL_ATTR(CKA_ENCRYPT, g_true)) ==
+            CKR_ATTRIBUTE_READ_ONLY,
+        "a secret key type that is not a CK_KEY_TYPE -> READ_ONLY (restrictive)"
     );
 }
 
@@ -1131,6 +1174,7 @@ int main(void)
     test_latches();
     test_other_classes();
     test_ec_usage();
+    test_derived_usage();
     test_shapes_and_order();
     test_create();
     test_public_keys();

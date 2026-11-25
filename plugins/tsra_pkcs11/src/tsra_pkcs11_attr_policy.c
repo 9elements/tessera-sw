@@ -10,6 +10,7 @@
 #include "tsra_pkcs11_ec_template.h"
 #include "tsra_pkcs11_template.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -233,14 +234,25 @@ static CK_RV carries(tsra_pkcs11_attr_reader read, void *ctx, CK_ATTRIBUTE_TYPE 
     return rv;
 }
 
+/* Whether `kt` is a secret key type whose device key fixes its usage: the
+ * ECDH secret only derives, an HMAC key only signs and verifies. */
+static bool fixed_secret_type(CK_KEY_TYPE kt)
+{
+    return (kt == CKK_GENERIC_SECRET) || (kt == CKK_SHA256_HMAC) || (kt == CKK_SHA384_HMAC) ||
+           (kt == CKK_SHA512_HMAC);
+}
+
 /*
- * Whether `type` is a usage the device fixed when it generated an EC key: a
- * private key signs or derives, and its public half verifies or derives. The
- * masked key keeps that usage, so these attributes are read-only on an EC key
- * where PKCS#11 lets them change (a deviation in the README); turning one on
- * would only fail later, at the operation.
+ * Whether `type` is a usage the device fixed when it made the key: an EC
+ * private key signs or derives and its public half verifies or derives
+ * (CKA_SIGN, CKA_VERIFY, CKA_DERIVE), and a derived generic secret or HMAC
+ * key keeps the usages it was derived with (every usage flag). The masked key
+ * keeps that usage, so these attributes are read-only on such a key where
+ * PKCS#11 lets them change (a deviation in the README); turning one on would
+ * only fail later, at the operation. AES keys keep their modifiable flags:
+ * the device AES key has both directions and the module enforces the flags.
  */
-static CK_RV ec_fixed_usage(
+static CK_RV fixed_usage(
     tsra_pkcs11_attr_reader read,
     void *ctx,
     unsigned cls,
@@ -249,8 +261,13 @@ static CK_RV ec_fixed_usage(
 )
 {
     *out = CK_FALSE;
-    if (((cls & (P11_CLS_PUBLIC | P11_CLS_PRIVATE)) == 0) ||
-        ((type != CKA_SIGN) && (type != CKA_VERIFY) && (type != CKA_DERIVE)))
+    bool ec_usage = ((cls & (P11_CLS_PUBLIC | P11_CLS_PRIVATE)) != 0) &&
+                    ((type == CKA_SIGN) || (type == CKA_VERIFY) || (type == CKA_DERIVE));
+    bool secret_usage = ((cls & P11_CLS_SECRET) != 0) &&
+                        ((type == CKA_ENCRYPT) || (type == CKA_DECRYPT) || (type == CKA_WRAP) ||
+                         (type == CKA_UNWRAP) || (type == CKA_SIGN) || (type == CKA_VERIFY) ||
+                         (type == CKA_DERIVE));
+    if (!ec_usage && !secret_usage)
     {
         return CKR_OK;
     }
@@ -259,7 +276,7 @@ static CK_RV ec_fixed_usage(
     CK_RV rv = read(ctx, &a);
     if (rv == CKR_ATTRIBUTE_TYPE_INVALID)
     {
-        return CKR_OK; /* no key type: not an EC key */
+        return CKR_OK; /* no key type: none of these keys */
     }
     if ((rv == CKR_BUFFER_TOO_SMALL) || (rv == CKR_ATTRIBUTE_SENSITIVE))
     {
@@ -270,7 +287,8 @@ static CK_RV ec_fixed_usage(
     {
         return rv;
     }
-    *out = ((a.ulValueLen != sizeof(kt)) || (kt == CKK_EC)) ? CK_TRUE : CK_FALSE;
+    bool fixed = ec_usage ? (kt == CKK_EC) : fixed_secret_type(kt);
+    *out = ((a.ulValueLen != sizeof(kt)) || fixed) ? CK_TRUE : CK_FALSE;
     return CKR_OK;
 }
 
@@ -361,7 +379,7 @@ CK_RV tsra_pkcs11_setattr_check(
             return CKR_TEMPLATE_INCONSISTENT;
         }
         CK_BBOOL fixed = CK_FALSE;
-        rv = ec_fixed_usage(read, ctx, cls, a->type, &fixed);
+        rv = fixed_usage(read, ctx, cls, a->type, &fixed);
         if (rv != CKR_OK)
         {
             return rv;

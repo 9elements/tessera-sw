@@ -24,6 +24,7 @@ testcases/ckr/test_ckr_codes.py::TestCKRSessionErrors::test_ckr_user_already_log
 testcases/ckr/test_ckr_decrypt.py::TestDecryptDataErrors::test_cbc_pad_bad_padding
 testcases/ckr/test_ckr_decrypt.py::TestDecryptInitErrors::test_mechanism_invalid
 testcases/ckr/test_ckr_decrypt.py::TestDecryptInitErrors::test_mechanism_param_invalid
+testcases/ckr/test_ckr_derive.py::TestDeriveKeyErrors::test_mechanism_invalid
 testcases/ckr/test_ckr_digest.py::TestDigestInitErrors::test_encrypt_mechanism_for_digest
 testcases/ckr/test_ckr_digest.py::TestDigestInitErrors::test_mechanism_invalid
 testcases/ckr/test_ckr_digest.py::TestDigestInitErrors::test_mechanism_param_invalid
@@ -76,6 +77,7 @@ testcases/ckr/test_ckr_object.py::TestSetAttributeErrors::test_set_readonly_clas
 testcases/ckr/test_ckr_priority.py::TestErrorPriority::test_bad_mechanism_with_bad_key_size
 testcases/ckr/test_ckr_priority.py::TestErrorPriority::test_destroyed_handle_with_wrong_mechanism
 testcases/ckr/test_ckr_raw_args_bad.py::TestArgsBadNullPointers::test_decrypt_init_null_mechanism
+testcases/ckr/test_ckr_raw_args_bad.py::TestArgsBadNullPointers::test_derive_key_null_mechanism
 testcases/ckr/test_ckr_raw_args_bad.py::TestArgsBadNullPointers::test_digest_init_null_mechanism
 testcases/ckr/test_ckr_raw_args_bad.py::TestArgsBadNullPointers::test_encrypt_init_null_mechanism
 testcases/ckr/test_ckr_raw_args_bad.py::TestArgsBadNullPointers::test_generate_key_null_mechanism
@@ -198,6 +200,7 @@ testcases/security/test_curve_oid_confusion.py::TestCurveOidConfusion::test_shor
 testcases/security/test_cve_regression.py::TestDecryptCrashRegression::test_rsa_encrypt_decrypt_no_crash
 testcases/security/test_cve_regression.py::TestInvalidECCurve::test_import_ec_key_with_bad_oid
 testcases/security/test_cve_regression.py::TestSessionObjectsAfterLogout::test_session_objects_after_logout
+testcases/security/test_ec_missing_params.py::TestEcMissingParams::test_ecdh_derive_curveless_base_does_not_crash
 testcases/security/test_ec_missing_params.py::TestEcMissingParams::test_get_ec_params_on_curveless_private_key_does_not_crash
 testcases/security/test_ec_missing_params.py::TestEcMissingParams::test_get_ec_point_on_curveless_key_does_not_crash[private_with_value]
 testcases/security/test_ec_missing_params.py::TestEcMissingParams::test_get_ec_point_on_curveless_key_does_not_crash[public_bare]
@@ -660,12 +663,14 @@ testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[AES_GCM
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[AES_KEY_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[AES_XTS]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[AES_XTS_KEY_GEN]
+testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDH1_DERIVE]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA_KEY_PAIR_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA_SHA1]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA_SHA256]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA_SHA384]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[ECDSA_SHA512]
+testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[HKDF_DERIVE]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[RSA_PKCS_KEY_PAIR_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[SHA256]
 testcases/test_mech_flags.py::TestMechFlags::test_expected_flags_present[SHA384]
@@ -677,12 +682,14 @@ testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[AES_GCM]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[AES_KEY_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[AES_XTS]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[AES_XTS_KEY_GEN]
+testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDH1_DERIVE]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA_KEY_PAIR_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA_SHA1]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA_SHA256]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA_SHA384]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[ECDSA_SHA512]
+testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[HKDF_DERIVE]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[RSA_AES_KEY_WRAP]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[RSA_PKCS_KEY_PAIR_GEN]
 testcases/test_mech_flags.py::TestMechFlags::test_min_le_max_key_size[SHA256]
