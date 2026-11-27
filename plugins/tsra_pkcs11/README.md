@@ -124,8 +124,9 @@ the spec requires). Implemented so far:
   device decrypts into a buffer of the module's own, and only a good result
   reaches the caller's buffer: every failed decryption (bad padding, wrong
   label, a ciphertext above the modulus) returns one
-  `CKR_ENCRYPTED_DATA_INVALID` and leaves the buffer untouched, so the token
-  is no padding oracle. `CKM_RSA_PKCS` is not offered (see Deviations).
+  `CKR_ENCRYPTED_DATA_INVALID` and leaves the buffer untouched, so the return
+  code tells nothing about the padding (the time of the call does, see
+  Deviations). `CKM_RSA_PKCS` is not offered (see Deviations).
 
 - **Multi-part `C_EncryptUpdate` / `C_EncryptFinal` and `C_DecryptUpdate` /
   `C_DecryptFinal` (the four AES mechanisms)**: the one-shot lifetime rules
@@ -367,6 +368,15 @@ the spec requires). Implemented so far:
   `CKM_RSA_PKCS_OAEP` to encrypt and the hashing `_RSA_PKCS` or PSS mechanisms
   to sign. A protocol that needs TLS 1.2 RSA key exchange or PKCS#1 v1.5
   decryption cannot use the token for it.
+- **OAEP decryption is not constant-time.** The device decrypts, and the SDK
+  removes the OAEP padding on the host. Its check returns at once when the
+  first byte of the decrypted block is not zero and runs both mask passes
+  otherwise. The module answers every failure the same way, but the time of a
+  call still shows whether that byte was zero, which is what Manger's attack
+  on OAEP needs. An application that decrypts ciphertexts from parties it does
+  not trust, who can measure its response times, is exposed until the SDK
+  decodes in constant time. A caller that may decrypt gains nothing from it.
+  An HSM usually removes the padding inside the device, in constant time.
 - **PSS and OAEP run MGF1 of their own hash.** The SDK takes PSS's MGF as
   given and then uses MGF1 with the signature hash, and runs OAEP only with
   MGF1 of the OAEP hash, SHA-2 only. So a PSS `mgf` other than MGF1 of

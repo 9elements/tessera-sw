@@ -996,6 +996,11 @@ static CK_RV oaep_crypt(
         *out_len = (rv == CKR_OK) ? n : 0;
         return rv;
     }
+    /* Every failure gives one code and an untouched buffer. The time still
+     * differs: the SDK removes the padding on the host and its check ends early
+     * on a nonzero first byte (crates/crypto rsa_pad_oaep.rs). The module cannot
+     * decode in its place, as the SDK offers no raw RSA decryption; the README
+     * lists this under Deviations. */
     CK_BYTE *plain = (CK_BYTE *)malloc(op->mod_len);
     if (plain == NULL)
     {
