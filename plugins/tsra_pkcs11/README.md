@@ -4,7 +4,7 @@ A standalone **PKCS#11 (Cryptoki) v3.1** module for the TSRA. It links the
 native C API (`tsra.h`, generated from `api/native`) the same way
 `plugins/ossl_prov` does.
 
-## Status: digests, AES, EC and RSA keys, ciphers, ECDSA, RSA signatures and OAEP, key unwrap, key derivation, host objects
+## Status: digests, AES, EC and RSA keys, ciphers, ECDSA, RSA signatures and OAEP, HMAC, key unwrap, key derivation, host objects
 
 Unimplemented PKCS#11 entry points return `CKR_FUNCTION_NOT_SUPPORTED` (after
 `C_Initialize`; before it every entry point other than `C_Initialize` and the
@@ -16,7 +16,7 @@ the spec requires). Implemented so far:
   login state machine. The "PKCS 11" interface comes in versions 3.1 (the
   default), 3.0 and 2.40 (`C_GetInterfaceList`, `C_GetInterface`), and
   `C_GetFunctionList` returns the 2.40 table.
-  `C_GetMechanismList` reports only the thirty mechanisms below, and
+  `C_GetMechanismList` reports only the thirty-three mechanisms below, and
   `C_GetTokenInfo` the real session counts (at most 256 sessions).
 - **`C_Login`**: runs the TSRA provisioning ceremony and opens one device
   session for the token. Provisioning is done lazily: login opens a device
@@ -252,11 +252,22 @@ the spec requires). Implemented so far:
   and `CKA_NEVER_EXTRACTABLE`, is private unless a session key's template
   says otherwise, and records its one family in `CKA_ALLOWED_MECHANISMS`
   (`CKM_HKDF_DERIVE` for the secret, the HMAC mechanism of an HMAC key's
-  hash, which arrives with HMAC signing). `C_CreateObject` still creates none
-  of these keys (see Deviations). `CKM_SP800_108_COUNTER_KDF` is not
-  offered.
-
-  HMAC signing is not implemented yet.
+  hash). `C_CreateObject` still creates none of these keys (see Deviations).
+  `CKM_SP800_108_COUNTER_KDF` is not offered.
+- **`C_Sign*` / `C_Verify*` with HMAC (`CKM_SHA256_HMAC`, `CKM_SHA384_HMAC`,
+  `CKM_SHA512_HMAC`)**, on the HMAC keys `C_DeriveKey` makes: one secret key
+  signs (`CKA_SIGN`) and verifies (`CKA_VERIFY`), and only with the mechanism
+  of its hash (see Deviations). One-shot and multi-part. A tag is as long as
+  the hash, 32, 48 or 64 bytes; a sizing call reports that length, a shorter
+  buffer gets `CKR_BUFFER_TOO_SMALL` and keeps the operation. A message is at
+  most 1024 bytes, in one call or summed over the parts: more returns
+  `CKR_DATA_LEN_RANGE` and ends the operation (see Deviations). A tag of
+  another length returns `CKR_SIGNATURE_LEN_RANGE`, a wrong one
+  `CKR_SIGNATURE_INVALID`. To verify, the device computes the tag and the
+  module compares it with the caller's in constant time, then wipes it; the
+  SDK's own HMAC verification compares in a time that depends on the tags.
+  The `_GENERAL` mechanisms (truncated tags) and HMAC over SHA-1 or SHA-224
+  are not offered.
 - **Ending an operation**: `C_DigestInit`, `C_EncryptInit`,
   `C_DecryptInit`, `C_SignInit` and `C_VerifyInit` with a NULL mechanism end
   the session's active operation of their kind (and return `CKR_OK` when
@@ -437,9 +448,18 @@ the spec requires). Implemented so far:
   `CKK_SHA256_HMAC`, `CKK_SHA384_HMAC` or `CKK_SHA512_HMAC` with
   `CKA_VALUE_LEN` absent or 32, 48 or 64 (`CKR_ATTRIBUTE_VALUE_INVALID`),
   signs and verifies only (another usage TRUE returns
-  `CKR_TEMPLATE_INCONSISTENT`), and comes only from `CKM_HKDF_DERIVE`.
-  `CKK_GENERIC_SECRET` is the ECDH secret alone. PKCS#11 HMAC mechanisms
-  also take `CKK_GENERIC_SECRET` keys of any length.
+  `CKR_TEMPLATE_INCONSISTENT`), and comes only from `CKM_HKDF_DERIVE`. An HMAC
+  mechanism runs only on the key type of its own hash: `CKM_SHA256_HMAC` on a
+  `CKK_SHA384_HMAC` key, on the ECDH secret or on any key that is not HMAC
+  returns `CKR_KEY_TYPE_INCONSISTENT`. `CKK_GENERIC_SECRET` is the ECDH secret
+  alone. PKCS#11 HMAC mechanisms also take `CKK_GENERIC_SECRET` keys of any
+  length.
+- **An HMAC covers at most 1024 bytes.** The device command holds at most
+  1024 bytes of message, so `C_Sign` or `C_Verify` with a longer message, or a
+  `C_SignUpdate` or `C_VerifyUpdate` that takes the parts past 1024 bytes,
+  returns `CKR_DATA_LEN_RANGE` and ends the operation. The token's HMAC suits
+  short messages, such as a key confirmation or a challenge; it cannot
+  authenticate TLS records or files. PKCS#11 sets no limit.
 - **HKDF reads the ECDH secret in the device's byte order.** On API 1.x
   devices, the only ones the module supports, the firmware hands HKDF the
   shared secret as it stores it: the x-coordinate least significant byte
@@ -696,6 +716,7 @@ over every hash and MGF, the PSS salt limit and the longest OAEP message),
 `tests/derive_params_test.c` (the
 ECDH and HKDF parameters, the peer point and the SubjectPublicKeyInfo built
 from it, the base key policy and every derived-key template verdict),
+`tests/wipe_test.c` (the wipe and the constant-time compare of HMAC tags),
 `tests/config_test.c` (the
 environment configuration, the PIN rules and the owner backup key, built as a
 hardware build) and `tests/config_file_test.c` (the configuration file
@@ -722,7 +743,10 @@ a token EC key and a host peer through ECDH and HKDF into AES-CBC keys,
 recomputed by the host oracle (with the HKDF input in the device's byte
 order), and into HMAC keys (their type, length and existence), with the
 Wycheproof ECDH points the token must refuse and every valid Wycheproof ECDH
-vector on a base key unwrapped from its private scalar, what `C_Logout`
+vector on a base key unwrapped from its private scalar, HMAC tags under keys
+derived from the NIST ECDH vectors, bit-exact against the host for every
+hash, one-shot and in parts, with the 1024-byte limit and the refusals of a
+verification, what `C_Logout`
 does to session objects, private token objects sealed at rest, the
 configuration at `C_Initialize`, the interface list, and the login rules (each
 login case in a process of its own, because the first login of a process

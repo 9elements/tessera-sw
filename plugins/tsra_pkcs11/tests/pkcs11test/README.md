@@ -149,9 +149,12 @@ of every one-block `C_EncryptUpdate`, while the SDK's CBC stream holds back the
 last full block until the final call (the spec allows that; the case joins the
 list once the SDK releases unpadded blocks at once), mechanisms this module
 does not implement
-(DES/3DES/AES-ECB, `CKM_RSA_PKCS`, MD5, HMAC, wrap/unwrap; pkcs11test 2cbe462
-has no EC cases), RSA key pairs as the token does not make them (generated,
-or signing and decrypting at once),
+(DES/3DES/AES-ECB, `CKM_RSA_PKCS`, MD5, wrap/unwrap; pkcs11test 2cbe462
+has no EC cases), HMAC on a plaintext `CKK_GENERIC_SECRET` imported with
+`C_CreateObject`, which the token refuses (its HMAC mechanisms take only the
+`CKK_SHA256_HMAC`, `CKK_SHA384_HMAC` and `CKK_SHA512_HMAC` keys HKDF makes),
+RSA key pairs as the token does not make them (generated, or signing and
+decrypting at once),
 entry points that are stubs (`C_CopyObject`, `C_DigestKey`), key import
 through `C_CreateObject` with `CKA_VALUE`, which the token refuses, keys that
 are not sensitive (`TookanAttackA4` and `A5b` ask for one, and the device holds

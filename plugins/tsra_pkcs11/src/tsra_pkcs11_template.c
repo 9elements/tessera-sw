@@ -77,6 +77,9 @@ static const tsra_pkcs11_sign_mech SIGN_MECHS[] = {
     { CKM_SHA256_RSA_PKCS_PSS, CKK_RSA, true },
     { CKM_SHA384_RSA_PKCS_PSS, CKK_RSA, true },
     { CKM_SHA512_RSA_PKCS_PSS, CKK_RSA, true },
+    { CKM_SHA256_HMAC, CKK_SHA256_HMAC, true },
+    { CKM_SHA384_HMAC, CKK_SHA384_HMAC, true },
+    { CKM_SHA512_HMAC, CKK_SHA512_HMAC, true },
 };
 
 const CK_ATTRIBUTE *tsra_pkcs11_tmpl_find(

@@ -67,6 +67,25 @@ static bool device_kind(tsra_pkcs11_key_kind_t kind, uint32_t *out_kind, uint32_
     }
 }
 
+/* The device kind of an HMAC kind; false for any other kind. */
+static bool hmac_kind(tsra_pkcs11_key_kind_t kind, uint32_t *out_kind)
+{
+    switch (kind)
+    {
+    case TSRA_PKCS11_KIND_HMAC_SHA256:
+        *out_kind = TSRA_KEY_KIND_HMAC_SHA256;
+        return true;
+    case TSRA_PKCS11_KIND_HMAC_SHA384:
+        *out_kind = TSRA_KEY_KIND_HMAC_SHA384;
+        return true;
+    case TSRA_PKCS11_KIND_HMAC_SHA512:
+        *out_kind = TSRA_KEY_KIND_HMAC_SHA512;
+        return true;
+    default:
+        return false;
+    }
+}
+
 /*
  * Nothing stops a caller from passing one buffer as both pData and
  * pEncryptedData. The native API would then hold an immutable slice over the
@@ -501,19 +520,18 @@ CK_RV tsra_pkcs11_key_pair_unwrap(
     return rv;
 }
 
-CK_RV tsra_pkcs11_key_aes_unmask(
+/* Unmask a secret key blob as the device kind `dev_kind`, for
+ * tsra_pkcs11_key_aes_unmask and tsra_pkcs11_key_hmac_unmask. */
+static CK_RV unmask_secret(
     uint32_t hsm_session,
-    tsra_pkcs11_key_kind_t kind,
+    uint32_t dev_kind,
     const CK_BYTE *blob,
     CK_ULONG blob_len,
     uint32_t *out_key
 )
 {
     /* The device buffer length is 32-bit; a blob beyond it cannot be passed. */
-    uint32_t dev_kind = 0;
-    uint32_t keygen_algo = 0;
-    if ((blob == NULL) || (blob_len == 0) || (blob_len > (CK_ULONG)UINT32_MAX) ||
-        (out_key == NULL) || !device_kind(kind, &dev_kind, &keygen_algo))
+    if ((blob == NULL) || (blob_len == 0) || (blob_len > (CK_ULONG)UINT32_MAX) || (out_key == NULL))
     {
         return CKR_ARGUMENTS_BAD;
     }
@@ -526,6 +544,60 @@ CK_RV tsra_pkcs11_key_aes_unmask(
         /* The only handle passed here is the device session: it going stale
          * means the recorded login no longer holds. */
         return tsra_pkcs11_ckr_from_tsra_hint((int)st, CKR_USER_NOT_LOGGED_IN);
+    }
+    *out_key = key;
+    return CKR_OK;
+}
+
+CK_RV tsra_pkcs11_key_aes_unmask(
+    uint32_t hsm_session,
+    tsra_pkcs11_key_kind_t kind,
+    const CK_BYTE *blob,
+    CK_ULONG blob_len,
+    uint32_t *out_key
+)
+{
+    uint32_t dev_kind = 0;
+    uint32_t keygen_algo = 0;
+    if (!device_kind(kind, &dev_kind, &keygen_algo))
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+    return unmask_secret(hsm_session, dev_kind, blob, blob_len, out_key);
+}
+
+CK_RV tsra_pkcs11_key_hmac_unmask(
+    uint32_t hsm_session,
+    tsra_pkcs11_key_kind_t kind,
+    const CK_BYTE *blob,
+    CK_ULONG blob_len,
+    uint32_t *out_key
+)
+{
+    uint32_t dev_kind = 0;
+    if ((out_key == NULL) || !hmac_kind(kind, &dev_kind))
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+    uint32_t key = 0;
+    CK_RV rv = unmask_secret(hsm_session, dev_kind, blob, blob_len, &key);
+    if (rv != CKR_OK)
+    {
+        return rv;
+    }
+    /* The SDK unmasks every HMAC blob as the hash the blob names, whatever
+     * `kind` says, while the caller takes the tag length and the mechanism
+     * from the object's CKA_KEY_TYPE; the two must agree. Only an edit of the
+     * store could part them (the key type is fixed when HKDF makes the key,
+     * and a token secret key's record is sealed), so no test reaches this. */
+    uint32_t got = 0;
+    struct tsra_key_prop prop = { TSRA_KEY_PROP_ID_KIND, &got, sizeof(got) };
+    tsra_status st = tsra_key_get_prop(key, &prop);
+    if ((st != TSRA_STATUS_SUCCESS) || (got != dev_kind))
+    {
+        TSRA_PKCS11_LOG("HMAC kind readback failed: %d (kind %u, want %u)", (int)st, got, dev_kind);
+        tsra_pkcs11_key_release(key);
+        return CKR_KEY_HANDLE_INVALID;
     }
     *out_key = key;
     return CKR_OK;
@@ -1127,6 +1199,16 @@ static bool sign_algo(CK_MECHANISM_TYPE mech, uint32_t *out)
     case CKM_SHA512_RSA_PKCS_PSS:
         *out = TSRA_ALGO_ID_RSA_PKCS_PSS_SHA512;
         return true;
+    /* The SDK takes the hash from the HMAC key and ignores the id. */
+    case CKM_SHA256_HMAC:
+        *out = TSRA_ALGO_ID_HMAC_SHA256;
+        return true;
+    case CKM_SHA384_HMAC:
+        *out = TSRA_ALGO_ID_HMAC_SHA384;
+        return true;
+    case CKM_SHA512_HMAC:
+        *out = TSRA_ALGO_ID_HMAC_SHA512;
+        return true;
     default:
         return false;
     }
@@ -1501,27 +1583,18 @@ static bool hkdf_target(
     uint32_t *use_b
 )
 {
-    *use_a = TSRA_KEY_PROP_ID_SIGN;
-    *use_b = TSRA_KEY_PROP_ID_VERIFY;
-    switch (kind)
+    if (kind == TSRA_PKCS11_KIND_AES)
     {
-    case TSRA_PKCS11_KIND_AES:
         *dev_kind = TSRA_KEY_KIND_AES;
         *use_a = TSRA_KEY_PROP_ID_ENCRYPT;
         *use_b = TSRA_KEY_PROP_ID_DECRYPT;
         return true;
-    case TSRA_PKCS11_KIND_HMAC_SHA256:
-        *dev_kind = TSRA_KEY_KIND_HMAC_SHA256;
-        return true;
-    case TSRA_PKCS11_KIND_HMAC_SHA384:
-        *dev_kind = TSRA_KEY_KIND_HMAC_SHA384;
-        return true;
-    case TSRA_PKCS11_KIND_HMAC_SHA512:
-        *dev_kind = TSRA_KEY_KIND_HMAC_SHA512;
-        return true;
-    default:
-        return false;
     }
+    /* Both HMAC usages: an HMAC verify signs on the device (tsra_pkcs11_sign.c
+     * mac_verify). */
+    *use_a = TSRA_KEY_PROP_ID_SIGN;
+    *use_b = TSRA_KEY_PROP_ID_VERIFY;
+    return hmac_kind(kind, dev_kind);
 }
 
 /* The SDK's HMAC for an HKDF PRF tsra_pkcs11_derive_params_check accepted;
@@ -1651,6 +1724,22 @@ CK_RV tsra_pkcs11_key_aes_generate(
 }
 
 CK_RV tsra_pkcs11_key_aes_unmask(
+    uint32_t hsm_session,
+    tsra_pkcs11_key_kind_t kind,
+    const CK_BYTE *blob,
+    CK_ULONG blob_len,
+    uint32_t *out_key
+)
+{
+    (void)hsm_session;
+    (void)kind;
+    (void)blob;
+    (void)blob_len;
+    (void)out_key;
+    return CKR_FUNCTION_NOT_SUPPORTED;
+}
+
+CK_RV tsra_pkcs11_key_hmac_unmask(
     uint32_t hsm_session,
     tsra_pkcs11_key_kind_t kind,
     const CK_BYTE *blob,

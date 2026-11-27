@@ -13,6 +13,7 @@
 
 #include "tsra_pkcs11_mech.h"
 #include "tsra_pkcs11_derive_params.h"
+#include "tsra_pkcs11_digest.h"
 #include "tsra_pkcs11_ec_template.h"
 #include "tsra_pkcs11_template.h"
 
@@ -58,7 +59,19 @@
     X(CKM_SHA256_RSA_PKCS_PSS, RSA_MIN_KEY_BITS, RSA_MAX_KEY_BITS, CKF_SIGN | CKF_VERIFY)          \
     X(CKM_SHA384_RSA_PKCS_PSS, RSA_MIN_KEY_BITS, RSA_MAX_KEY_BITS, CKF_SIGN | CKF_VERIFY)          \
     X(CKM_SHA512_RSA_PKCS_PSS, RSA_MIN_KEY_BITS, RSA_MAX_KEY_BITS, CKF_SIGN | CKF_VERIFY)          \
-    X(CKM_RSA_PKCS_OAEP, RSA_MIN_KEY_BITS, RSA_MAX_KEY_BITS, CKF_ENCRYPT | CKF_DECRYPT)
+    X(CKM_RSA_PKCS_OAEP, RSA_MIN_KEY_BITS, RSA_MAX_KEY_BITS, CKF_ENCRYPT | CKF_DECRYPT)            \
+    X(CKM_SHA256_HMAC,                                                                             \
+      TSRA_PKCS11_SHA256_DIGEST_LEN,                                                               \
+      TSRA_PKCS11_SHA256_DIGEST_LEN,                                                               \
+      CKF_SIGN | CKF_VERIFY)                                                                       \
+    X(CKM_SHA384_HMAC,                                                                             \
+      TSRA_PKCS11_SHA384_DIGEST_LEN,                                                               \
+      TSRA_PKCS11_SHA384_DIGEST_LEN,                                                               \
+      CKF_SIGN | CKF_VERIFY)                                                                       \
+    X(CKM_SHA512_HMAC,                                                                             \
+      TSRA_PKCS11_SHA512_DIGEST_LEN,                                                               \
+      TSRA_PKCS11_SHA512_DIGEST_LEN,                                                               \
+      CKF_SIGN | CKF_VERIFY)
 
 #define P11_MECH_ROW(t, lo, hi, f) { (t), (lo), (hi), (f) },
 

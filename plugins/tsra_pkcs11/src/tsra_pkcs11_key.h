@@ -40,6 +40,11 @@ extern "C"
 #define AES_XTS_TWEAK_LEN 16
 #define AES_XTS_MAX_DATA_LEN 8192
 
+/* The longest message an HMAC covers, one-shot or summed over the parts: the
+ * device command holds at most this many bytes (api/lib
+ * HsmHmacAlgo::MAX_MESSAGE_SIZE, the msg of ddi/mbor DdiHmacReq). */
+#define HMAC_MAX_DATA_LEN 1024
+
 /* The size of the partition's one RSA unwrapping key, the only RSA key the
  * device generates (api/lib HsmRsaKeyUnwrappingKeyGenAlgo). */
 #define RSA_UNWRAP_KEY_BITS 2048
@@ -56,7 +61,8 @@ extern "C"
  * handles and validators, so the kind travels with every key call. Named
  * here rather than as TSRA_KEY_KIND_* so the entry points stay compilable
  * without tsra.h; tsra_pkcs11_key.c translates it (device_kind() for the AES
- * kinds, hkdf_target() for what HKDF derives) and refuses any other value.
+ * kinds, hmac_kind() for the HMAC kinds, hkdf_target() for what HKDF derives)
+ * and refuses any other value.
  * The shared secret and the HMAC kinds exist only as C_DeriveKey output, and
  * the RSA kind only names the key pair CKM_RSA_PKCS_OAEP runs on, which
  * tsra_pkcs11_key_rsa_unmask binds.
@@ -129,6 +135,20 @@ CK_RV tsra_pkcs11_key_aes_generate(
  * fail-closed backstop behind the host-side mechanism/key-type gates.
  */
 CK_RV tsra_pkcs11_key_aes_unmask(
+    uint32_t hsm_session,
+    tsra_pkcs11_key_kind_t kind,
+    const CK_BYTE *blob,
+    CK_ULONG blob_len,
+    uint32_t *out_key
+);
+
+/*
+ * Unmask a stored HMAC masked blob of `kind` (an HMAC kind) into a device key
+ * handle, as tsra_pkcs11_key_aes_unmask does for AES. The SDK takes the hash
+ * from the blob, so the device key's kind is read back: a blob of another
+ * hash than `kind` returns CKR_KEY_HANDLE_INVALID, with no handle left.
+ */
+CK_RV tsra_pkcs11_key_hmac_unmask(
     uint32_t hsm_session,
     tsra_pkcs11_key_kind_t kind,
     const CK_BYTE *blob,
@@ -438,7 +458,8 @@ CK_RV tsra_pkcs11_key_sign(
 
 /* One-shot verify of `sig` over `in`, `pss` as for tsra_pkcs11_key_sign:
  * CKR_OK for a valid signature, CKR_SIGNATURE_INVALID for one that does not
- * verify. */
+ * verify. Not for an HMAC mechanism, whose tag the caller compares itself
+ * (the SDK's compare is not constant time). */
 CK_RV tsra_pkcs11_key_verify(
     CK_MECHANISM_TYPE mech,
     const CK_RSA_PKCS_PSS_PARAMS *pss,

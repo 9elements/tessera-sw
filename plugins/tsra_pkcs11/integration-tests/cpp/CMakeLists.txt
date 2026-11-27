@@ -93,6 +93,7 @@ set(SOURCE
     unwrap/private_tests.cpp
     rsa/sign_tests.cpp
     rsa/oaep_tests.cpp
+    hmac/hmac_tests.cpp
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

@@ -13,7 +13,7 @@ emulator module. Do not edit it by hand: change the bucket rules in
 | des | 77 | DES or 3DES, which the SDK does not have: the cipher and dual-function fixtures' DES cases, and FindObjectSubset, which generates DES keys and RSA key pairs. |
 | aes-ecb | 18 | AES-ECB, out of scope for the module. The two IV cases pass without asserting anything: ECB takes no IV. |
 | rsa-keygen | 11 | RSA key pairs as the module does not make them. Its keys arrive by unwrap (rsa-fixture.patch), each signing or decrypting but not both, private on the token, in a logged-in session. So the CKM_RSA_PKCS and MD5 cases (neither offered; pkcs11test skips the signature ones), a key that signs with recovery and decrypts, a token pair with CKA_PRIVATE FALSE, C_GenerateKeyPair templates for other RSA keys and a test without a login stay off. |
-| hmac | 11 | HMAC keys from CKM_GENERIC_SECRET_KEY_GEN, which the SDK cannot generate. The module's HMAC keys come from ECDH plus HKDF, so these fixtures cannot pass. |
+| hmac | 11 | Import a plaintext CKK_GENERIC_SECRET with CKA_VALUE through C_CreateObject, which the token refuses. Its HMAC mechanisms take only the CKK_SHA256_HMAC, CKK_SHA384_HMAC and CKK_SHA512_HMAC keys HKDF makes, so these fixtures cannot pass. |
 | md5 | 12 | MD5, which the module does not offer. pkcs11test skips these cases. |
 | so | 10 | The Security Officer. The device session has one user credential, so CKU_SO is refused and the token is presented initialised. pkcs11test skips the SO logins under -X and token initialisation without -I. |
 | rng | 3 | Random numbers. The module has no generator. |

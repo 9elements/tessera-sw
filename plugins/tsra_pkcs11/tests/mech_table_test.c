@@ -193,6 +193,19 @@ static void test_sweep(void)
         (oaep != NULL) && (oaep->flags == (CKF_ENCRYPT | CKF_DECRYPT)),
         "CKM_RSA_PKCS_OAEP encrypts and decrypts, and wraps nothing"
     );
+    const tsra_pkcs11_mech_t *hmac = tsra_pkcs11_mech_find(CKM_SHA384_HMAC);
+    CHECK(
+        (hmac != NULL) && (hmac->min_key == TSRA_PKCS11_SHA384_DIGEST_LEN) &&
+            (hmac->max_key == TSRA_PKCS11_SHA384_DIGEST_LEN) &&
+            (hmac->flags == (CKF_SIGN | CKF_VERIFY)),
+        "an HMAC row signs and verifies with a key as long as its hash, in bytes"
+    );
+    CHECK(
+        (tsra_pkcs11_mech_find(CKM_SHA_1_HMAC) == NULL) &&
+            (tsra_pkcs11_mech_find(CKM_SHA224_HMAC) == NULL) &&
+            (tsra_pkcs11_mech_find(CKM_SHA256_HMAC_GENERAL) == NULL),
+        "SHA-1 and SHA-224 HMAC and the _GENERAL variants are not advertised"
+    );
     const tsra_pkcs11_mech_t *aes = tsra_pkcs11_mech_find(CKM_AES_CBC);
     CHECK((aes != NULL) && ((aes->flags & EC_MECH_FLAGS) == 0), "an AES row has no EC flags");
 }

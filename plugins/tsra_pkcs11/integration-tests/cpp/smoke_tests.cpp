@@ -283,6 +283,23 @@ TEST_F(smoke_login, every_advertised_mechanism_has_an_init_path)
                 priv = rsa_sign.priv;
                 pub = rsa_sign.pub;
                 break;
+            case CKM_SHA256_HMAC:
+            case CKM_SHA384_HMAC:
+            case CKM_SHA512_HMAC: {
+                /* An HMAC key of the mechanism's hash, from the HKDF row's secret. */
+                ASSERT_NE(0u, secret) << "the table lists CKM_ECDH1_DERIVE first";
+                CK_KEY_TYPE hmac_type = (m == CKM_SHA384_HMAC)   ? CKK_SHA384_HMAC
+                                        : (m == CKM_SHA512_HMAC) ? CKK_SHA512_HMAC
+                                                                 : CKK_SHA256_HMAC;
+                CK_ATTRIBUTE to_hmac[] = {
+                    { CKA_CLASS, &secret_class, sizeof(secret_class) },
+                    { CKA_KEY_TYPE, &hmac_type, sizeof(hmac_type) },
+                };
+                CK_MECHANISM derive = { CKM_HKDF_DERIVE, &hkdf, sizeof(hkdf) };
+                ASSERT_CKR_OK(p11()->C_DeriveKey(s_, &derive, secret, to_hmac, 2, &priv));
+                pub = priv; /* one secret key signs and verifies */
+                break;
+            }
             default:
                 ADD_FAILURE() << "no key for this sign mechanism";
                 continue;

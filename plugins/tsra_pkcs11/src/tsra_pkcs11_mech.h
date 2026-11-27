@@ -21,8 +21,9 @@ extern "C"
  * directions.
  */
 
-/* One row. Key sizes are in bytes for AES and generic secrets and in bits for
- * EC and RSA (as PKCS#11 counts them); 0 where a mechanism takes no key. */
+/* One row. Key sizes are in bytes for AES, generic secret and HMAC keys (an
+ * HMAC key is as long as its hash) and in bits for EC and RSA (as PKCS#11
+ * counts them); 0 where a mechanism takes no key. */
 typedef struct
 {
     CK_MECHANISM_TYPE type;
@@ -31,9 +32,9 @@ typedef struct
     CK_FLAGS flags;
 } tsra_pkcs11_mech_t;
 
-/* Rows in tsra_pkcs11_mechs; a piece that implements a mechanism appends its
+/* Rows in tsra_pkcs11_mechs; a change that implements a mechanism appends its
  * row and raises this (checked at compile time). */
-#define TSRA_PKCS11_MECH_COUNT 30
+#define TSRA_PKCS11_MECH_COUNT 33
 
 extern const tsra_pkcs11_mech_t tsra_pkcs11_mechs[];
 

@@ -61,6 +61,7 @@ tsra_pkcs11_template.c tsra_pkcs11_ec_template.c tsra_pkcs11_attr_types.c tsra_p
     "derive_params_test tsra_pkcs11_derive_params.c tsra_pkcs11_ec_template.c \
 tsra_pkcs11_template.c tsra_pkcs11_attr_types.c"
     "rsa_params_test tsra_pkcs11_rsa_params.c tsra_pkcs11_digest.c"
+    "wipe_test"
 )
 
 echo "unit harnesses (${SANITIZE:-ubsan}):"
