@@ -972,20 +972,59 @@ static void test_public_keys(void)
 {
     printf("== C_CreateObject: EC and RSA public keys ==\n");
     static const CK_BYTE p256[] = { 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07 };
+    static const CK_BYTE p384[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22 };
     static const CK_BYTE p521[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23 };
     static const CK_BYTE k256[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a }; /* secp256k1 */
     static const CK_BYTE cut[] = { 0x06, 0x05, 0x2b, 0x81, 0x04 };
+    /* Every curve the token takes; the P-521 point needs the long-form length. */
+    static const struct
+    {
+        const char *name;
+        const CK_BYTE *oid;
+        CK_ULONG oid_len;
+        CK_ULONG coord;
+    } curves[] = {
+        { "P-256", p256, sizeof(p256), COORD_P256 },
+        { "P-384", p384, sizeof(p384), COORD_P384 },
+        { "P-521", p521, sizeof(p521), COORD_P521 },
+    };
+    for (size_t i = 0; i < COUNT(curves); i++)
+    {
+        printf("  %s\n", curves[i].name);
+        const CK_BYTE *oid = curves[i].oid;
+        CK_ULONG oid_len = curves[i].oid_len;
+        /* Room for the longest point and one byte after it. */
+        CK_BYTE pt[DER_HEADER_MAX + POINT_LEN(COORD_P521) + 1];
+        CK_BYTE other[DER_HEADER_MAX + POINT_LEN(COORD_P521)];
+        CK_ULONG n = ec_point(pt, curves[i].coord);
+        CK_ULONG hdr = n - POINT_LEN(curves[i].coord);
+        CK_ULONG n_other = ec_point(other, curves[(i + 1) % COUNT(curves)].coord);
+        CHECK(create_ec(oid, oid_len, pt, n) == CKR_OK, "a key on the curve -> OK");
+        CHECK(
+            create_ec(oid, oid_len, other, n_other) == CKR_ATTRIBUTE_VALUE_INVALID,
+            "a point of another curve -> VALUE_INVALID"
+        );
+        CHECK(
+            create_ec(oid, oid_len, pt + hdr, n - hdr) == CKR_ATTRIBUTE_VALUE_INVALID,
+            "a bare point without its OCTET STRING -> VALUE_INVALID"
+        );
+        CHECK(
+            create_ec(oid, oid_len, pt, n - 1) == CKR_ATTRIBUTE_VALUE_INVALID,
+            "a point one byte short -> VALUE_INVALID"
+        );
+        pt[n] = 0;
+        CHECK(
+            create_ec(oid, oid_len, pt, n + 1) == CKR_ATTRIBUTE_VALUE_INVALID,
+            "a byte after the OCTET STRING -> VALUE_INVALID"
+        );
+        pt[hdr] = POINT_COMPRESSED_EVEN;
+        CHECK(
+            create_ec(oid, oid_len, pt, n) == CKR_ATTRIBUTE_VALUE_INVALID,
+            "a compressed point -> VALUE_INVALID"
+        );
+    }
     CK_BYTE pt256[DER_HEADER_MAX + POINT_LEN(COORD_P256)];
-    CK_BYTE pt384[DER_HEADER_MAX + POINT_LEN(COORD_P384)];
-    CK_BYTE pt521[DER_HEADER_MAX + POINT_LEN(COORD_P521)];
     CK_ULONG n256 = ec_point(pt256, COORD_P256);
-    CK_ULONG n384 = ec_point(pt384, COORD_P384);
-    CK_ULONG n521 = ec_point(pt521, COORD_P521);
-    CHECK(create_ec(p256, sizeof(p256), pt256, n256) == CKR_OK, "a P-256 key -> OK");
-    CHECK(
-        create_ec(p521, sizeof(p521), pt521, n521) == CKR_OK,
-        "a P-521 key (long-form length) -> OK"
-    );
     CHECK(
         create_ec(k256, sizeof(k256), pt256, n256) == CKR_CURVE_NOT_SUPPORTED,
         "secp256k1 -> CURVE_NOT_SUPPORTED"
@@ -993,33 +1032,6 @@ static void test_public_keys(void)
     CHECK(
         create_ec(cut, sizeof(cut), pt256, n256) == CKR_ATTRIBUTE_VALUE_INVALID,
         "a truncated curve OID -> VALUE_INVALID"
-    );
-    CHECK(
-        create_ec(p256, sizeof(p256), pt384, n384) == CKR_ATTRIBUTE_VALUE_INVALID,
-        "a P-384 point on P-256 -> VALUE_INVALID"
-    );
-    CHECK(
-        create_ec(p256, sizeof(p256), pt256 + DER_HEADER_SHORT, n256 - DER_HEADER_SHORT) ==
-            CKR_ATTRIBUTE_VALUE_INVALID,
-        "a bare point without its OCTET STRING -> VALUE_INVALID"
-    );
-    CK_BYTE compressed[sizeof(pt256)];
-    memcpy(compressed, pt256, n256);
-    compressed[DER_HEADER_SHORT] = POINT_COMPRESSED_EVEN;
-    CHECK(
-        create_ec(p256, sizeof(p256), compressed, n256) == CKR_ATTRIBUTE_VALUE_INVALID,
-        "a compressed point -> VALUE_INVALID"
-    );
-    CHECK(
-        create_ec(p256, sizeof(p256), pt256, n256 - 1) == CKR_ATTRIBUTE_VALUE_INVALID,
-        "a point one byte short -> VALUE_INVALID"
-    );
-    CK_BYTE longer[sizeof(pt256) + 1];
-    memcpy(longer, pt256, n256);
-    longer[n256] = 0;
-    CHECK(
-        create_ec(p256, sizeof(p256), longer, n256 + 1) == CKR_ATTRIBUTE_VALUE_INVALID,
-        "a byte after the OCTET STRING -> VALUE_INVALID"
     );
     /* The P-256 point with its length in a form DER does not allow: the long
      * form below 128, and a leading zero length byte. Each is its header, then
