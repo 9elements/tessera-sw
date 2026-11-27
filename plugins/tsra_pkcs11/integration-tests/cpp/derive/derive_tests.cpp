@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "tsra_pkcs11_derive_params.h"
@@ -84,50 +85,52 @@ const char *prf_name(CK_MECHANISM_TYPE prf)
     }
 }
 
-/// CK_ECDH1_DERIVE_PARAMS with CKD_NULL around `point` (raw or DER).
+/// CK_ECDH1_DERIVE_PARAMS with CKD_NULL around a copy of `point` (raw or DER),
+/// so a temporary argument is safe.
 struct EcdhMechanism
 {
-    explicit EcdhMechanism(const std::vector<CK_BYTE> &point)
-        : params{ CKD_NULL,
-                  0,
-                  nullptr,
-                  static_cast<CK_ULONG>(point.size()),
-                  const_cast<CK_BYTE_PTR>(point.data()) },
+    explicit EcdhMechanism(host::Bytes point)
+        : point_bytes(std::move(point)), params{ CKD_NULL,
+                                                 0,
+                                                 nullptr,
+                                                 static_cast<CK_ULONG>(point_bytes.size()),
+                                                 point_bytes.data() },
           mech{ CKM_ECDH1_DERIVE, &params, sizeof(params) }
     {
     }
-    EcdhMechanism(const EcdhMechanism &) = delete; /* mech points into this object */
+    EcdhMechanism(const EcdhMechanism &) = delete; /* params and mech point into this object */
     EcdhMechanism &operator=(const EcdhMechanism &) = delete;
 
+    host::Bytes point_bytes; /* declared before params, which points into it */
     CK_ECDH1_DERIVE_PARAMS params;
     CK_MECHANISM mech;
 };
 
 /// CK_HKDF_PARAMS for extract and expand with `prf`, a salt of bytes (none
-/// when `salt_null`) and `info`.
+/// when `salt_null`) and `info`. It keeps copies of both, so temporary
+/// arguments are safe.
 struct HkdfMechanism
 {
-    HkdfMechanism(
-        CK_MECHANISM_TYPE prf,
-        const host::Bytes &salt,
-        const host::Bytes &info,
-        bool salt_null = false
-    )
-        : params{ CK_TRUE,
+    HkdfMechanism(CK_MECHANISM_TYPE prf, host::Bytes salt, host::Bytes info, bool salt_null = false)
+        : salt_bytes(std::move(salt)), info_bytes(std::move(info)),
+          params{ CK_TRUE,
                   CK_TRUE,
                   prf,
                   salt_null ? CKF_HKDF_SALT_NULL : CKF_HKDF_SALT_DATA,
-                  salt_null ? nullptr : const_cast<CK_BYTE_PTR>(salt.data()),
-                  salt_null ? 0 : static_cast<CK_ULONG>(salt.size()),
+                  salt_null ? nullptr : salt_bytes.data(),
+                  salt_null ? 0 : static_cast<CK_ULONG>(salt_bytes.size()),
                   CK_INVALID_HANDLE,
-                  const_cast<CK_BYTE_PTR>(info.data()),
-                  static_cast<CK_ULONG>(info.size()) },
+                  info_bytes.data(),
+                  static_cast<CK_ULONG>(info_bytes.size()) },
           mech{ CKM_HKDF_DERIVE, &params, sizeof(params) }
     {
     }
-    HkdfMechanism(const HkdfMechanism &) = delete; /* mech points into this object */
+    HkdfMechanism(const HkdfMechanism &) = delete; /* params and mech point into this object */
     HkdfMechanism &operator=(const HkdfMechanism &) = delete;
 
+    /* Declared before params, which points into them. */
+    host::Bytes salt_bytes;
+    host::Bytes info_bytes;
     CK_HKDF_PARAMS params;
     CK_MECHANISM mech;
 };
