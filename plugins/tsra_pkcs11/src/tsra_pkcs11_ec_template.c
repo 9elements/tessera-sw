@@ -144,10 +144,11 @@ CK_ULONG tsra_pkcs11_ec_coord_len(tsra_pkcs11_ec_curve_t curve)
 }
 
 /* The length of an uncompressed point on `c`: EC_POINT_UNCOMPRESSED, then both
- * coordinates. */
+ * coordinates. Without a curve it is 0, a length no point has; the callers
+ * refuse a missing curve before they get here. */
 static CK_ULONG uncompressed_len(const curve_info *c)
 {
-    return 1 + (2 * c->coord_len);
+    return (c != NULL) ? (1 + (2 * c->coord_len)) : 0;
 }
 
 CK_RV tsra_pkcs11_ec_point_check(const void *value, CK_ULONG len, tsra_pkcs11_ec_curve_t curve)
